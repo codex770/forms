@@ -5,7 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Separator } from '@/components/ui/separator';
-import { Head, Link, router } from '@inertiajs/vue3';
+import { Head, Link, router, usePage } from '@inertiajs/vue3';
 import { index as contactIndex, toggleRead as contactToggleRead, destroy as contactDestroy } from '@/routes/contact';
 import { 
     ArrowLeft, 
@@ -53,10 +53,11 @@ interface Props {
 
 const props = defineProps<Props>();
 
+const authUser = computed(() => usePage().props.auth.user);
+
 // Check if current user has read the submission
 const isReadByCurrentUser = computed((): boolean => {
-    const currentUserId = (window as any).Laravel?.user?.id;
-    return props.submission.reads_with_users.some(read => read.user_id === currentUserId);
+    return props.submission.reads_with_users.some(read => read.user_id === authUser.value?.id);
 });
 
 // Get initials for avatar

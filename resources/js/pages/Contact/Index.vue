@@ -4,10 +4,11 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Separator } from '@/components/ui/separator';
-import { Head, Link, router } from '@inertiajs/vue3';
+import { Head, Link, router, usePage } from '@inertiajs/vue3';
 import { index as contactIndex, show as contactShow, toggleRead as contactToggleRead, destroy as contactDestroy } from '@/routes/contact';
 import { 
     Search, 
@@ -23,7 +24,7 @@ import {
     CheckCircle2,
     AlertCircle
 } from 'lucide-vue-next';
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, watch } from 'vue';
 
 interface ContactSubmission {
     id: number;
@@ -66,14 +67,15 @@ const props = defineProps<Props>();
 
 const isMounted = ref(false);
 
+const authUser = computed(() => usePage().props.auth.user);
+
 const searchQuery = ref(props.filters.search || '');
 const selectedCategory = ref(props.filters.category || 'all');
 const selectedStatus = ref(props.filters.status || 'all');
 
 // Check if current user has read the submission
 const isReadByCurrentUser = (submission: ContactSubmission): boolean => {
-    const currentUserId = (window as any).Laravel?.user?.id;
-    return submission.reads_with_users.some(read => read.user_id === currentUserId);
+    return submission.reads_with_users.some(read => read.user_id === authUser.value?.id);
 };
 
 // Get initials for avatar
@@ -91,6 +93,17 @@ const getCategoryBadgeVariant = (category: string) => {
         'bigkarriere': 'default'
     };
     return variants[category] || 'default';
+};
+
+// Get category display name
+const getCategoryName = (category: string): string => {
+    return props.categories[category] || category;
+};
+
+// Get message preview (only 3 words)
+const getMessagePreview = (description: string): string => {
+    const words = description.split(' ').slice(0, 3);
+    return words.length >= 3 ? words.join(' ') + '...' : description;
 };
 
 // Apply filters
@@ -114,6 +127,23 @@ const resetFilters = () => {
     selectedStatus.value = 'all';
     applyFilters();
 };
+
+// Simple debounce function
+const debounce = (func: Function, delay: number) => {
+    let timeoutId: NodeJS.Timeout;
+    return (...args: any[]) => {
+        clearTimeout(timeoutId);
+        timeoutId = setTimeout(() => func.apply(null, args), delay);
+    };
+};
+
+// Debounced apply filters for search
+const debouncedApplyFilters = debounce(applyFilters, 300);
+
+// Watch for filter changes
+watch([searchQuery, selectedCategory, selectedStatus], () => {
+    debouncedApplyFilters();
+});
 
 // Toggle read status
 const toggleRead = (submission: ContactSubmission) => {
@@ -240,134 +270,168 @@ onMounted(() => {
                     </p>
                 </div>
 
-                <!-- Messages List -->
-                <div class="space-y-4">
-                    <div v-if="!submissions.data || submissions.data.length === 0" class="text-center py-12">
-                        <MessageSquare class="mx-auto h-12 w-12 text-gray-400" />
-                        <h3 class="mt-4 text-lg font-medium text-gray-900">No messages found</h3>
-                        <p class="mt-2 text-gray-500">No contact messages match your current filters.</p>
-                    </div>
+                <!-- Messages Table -->
+                <Card>
+                    <CardContent class="p-0">
+                        <div v-if="!submissions.data || submissions.data.length === 0" class="text-center py-12">
+                            <MessageSquare class="mx-auto h-12 w-12 text-gray-400" />
+                            <h3 class="mt-4 text-lg font-medium text-gray-900">No messages found</h3>
+                            <p class="mt-2 text-gray-500">No contact messages match your current filters.</p>
+                        </div>
 
-                    <Card 
-                        v-for="submission in submissions.data || []" 
-                        :key="submission.id"
-                        :class="[
-                            'cursor-pointer transition-colors hover:bg-gray-50',
-                            !isReadByCurrentUser(submission) ? 'border-l-4 border-l-blue-500 bg-blue-50/30' : ''
-                        ]"
-                    >
-                        <CardContent class="p-6">
-                            <div class="flex items-start justify-between">
-                                <!-- Message Content -->
-                                <div class="flex-1 min-w-0">
-                                    <div class="flex items-center gap-3 mb-3">
-                                        <!-- Read/Unread Indicator -->
-                                        <div class="flex items-center gap-2">
-                                            <div v-if="isReadByCurrentUser(submission)" 
-                                                 class="flex items-center text-green-600">
-                                                <CheckCircle2 class="h-4 w-4" />
-                                                <span class="text-xs ml-1">Read</span>
-                                            </div>
-                                            <div v-else class="flex items-center text-blue-600">
-                                                <AlertCircle class="h-4 w-4" />
-                                                <span class="text-xs ml-1">Unread</span>
+                        <Table v-else>
+                            <TableHeader>
+                                <TableRow>
+                                    <TableHead class="w-12">Status</TableHead>
+                                    <TableHead class="w-16">ID</TableHead>
+                                    <TableHead>Sender</TableHead>
+                                    <TableHead class="w-32">Category</TableHead>
+                                    <TableHead class="hidden md:table-cell">Message Preview</TableHead>
+                                    <TableHead class="w-32">Date</TableHead>
+                                    <TableHead class="w-20 text-center">Read By</TableHead>
+                                    <TableHead class="w-48 text-right">Actions</TableHead>
+                                </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                                <TableRow 
+                                    v-for="submission in submissions.data || []" 
+                                    :key="submission.id"
+                                    :class="[
+                                        'transition-colors hover:bg-gray-50/50',
+                                        !isReadByCurrentUser(submission) ? 'bg-blue-50/30 border-l-4 border-l-blue-500' : ''
+                                    ]"
+                                >
+                                    <!-- Status -->
+                                    <TableCell>
+                                        <div class="flex items-center justify-center">
+                                            <CheckCircle2 
+                                                v-if="isReadByCurrentUser(submission)" 
+                                                class="h-4 w-4 text-green-600" 
+                                                title="Read"
+                                            />
+                                            <AlertCircle 
+                                                v-else 
+                                                class="h-4 w-4 text-blue-600" 
+                                                title="Unread"
+                                            />
+                                        </div>
+                                    </TableCell>
+
+                                    <!-- ID -->
+                                    <TableCell class="font-mono text-sm text-gray-500">
+                                        #{{ submission.id }}
+                                    </TableCell>
+
+                                    <!-- Sender -->
+                                    <TableCell>
+                                        <div class="flex items-center gap-3">
+                                            <Avatar class="h-8 w-8 hidden sm:flex">
+                                                <AvatarFallback class="text-xs">
+                                                    {{ getInitials(submission.data.name) }}
+                                                </AvatarFallback>
+                                            </Avatar>
+                                            <div class="min-w-0 flex-1">
+                                                <div class="font-medium text-gray-900 truncate">
+                                                    {{ submission.data.name }}
+                                                </div>
+                                                <div class="text-sm text-gray-500 truncate">
+                                                    {{ submission.data.email }}
+                                                </div>
                                             </div>
                                         </div>
+                                    </TableCell>
 
-                                        <!-- Category Badge -->
-                                        <Badge :variant="getCategoryBadgeVariant(submission.category)">
-                                            {{ categories[submission.category] }}
+                                    <!-- Category -->
+                                    <TableCell>
+                                        <Badge :variant="getCategoryBadgeVariant(submission.category)" class="text-xs">
+                                            {{ getCategoryName(submission.category) }}
                                         </Badge>
-
-                                        <!-- Timestamp -->
-                                        <div class="flex items-center text-gray-500 text-sm">
-                                            <Calendar class="h-4 w-4 mr-1" />
-                                            {{ new Date(submission.created_at).toLocaleDateString() }}
-                                        </div>
-                                    </div>
-
-                                    <!-- Sender Info -->
-                                    <div class="flex items-center gap-3 mb-3">
-                                        <Avatar class="h-8 w-8">
-                                            <AvatarFallback>
-                                                {{ getInitials(submission.data.name) }}
-                                            </AvatarFallback>
-                                        </Avatar>
-                                        <div>
-                                            <div class="font-medium text-gray-900">
-                                                {{ submission.data.name }}
-                                            </div>
-                                            <div class="text-sm text-gray-500">
-                                                {{ submission.data.email }}
-                                            </div>
-                                        </div>
-                                    </div>
+                                    </TableCell>
 
                                     <!-- Message Preview -->
-                                    <p class="text-gray-700 mb-4">
-                                        {{ truncate(submission.data.description, 150) }}
-                                    </p>
-
-                                    <!-- Read By Users -->
-                                    <div v-if="submission.reads_with_users.length > 0" class="flex items-center gap-2 mb-4">
-                                        <Eye class="h-4 w-4 text-gray-400" />
-                                        <span class="text-sm text-gray-500">Read by:</span>
-                                        <div class="flex items-center gap-1">
-                                            <div 
-                                                v-for="read in submission.reads_with_users.slice(0, 3)" 
-                                                :key="read.id"
-                                                class="flex items-center"
-                                            >
-                                                <Avatar class="h-6 w-6">
-                                                    <AvatarFallback class="text-xs">
-                                                        {{ getInitials(read.user.name) }}
-                                                    </AvatarFallback>
-                                                </Avatar>
-                                            </div>
-                                            <span v-if="submission.reads_with_users.length > 3" 
-                                                  class="text-xs text-gray-500 ml-1">
-                                                +{{ submission.reads_with_users.length - 3 }} more
-                                            </span>
+                                    <TableCell class="hidden md:table-cell">
+                                        <div class="max-w-xs">
+                                            <p class="text-sm text-gray-700">
+                                                {{ getMessagePreview(submission.data.description) }}
+                                            </p>
                                         </div>
-                                    </div>
-                                </div>
+                                    </TableCell>
 
-                                <!-- Action Buttons -->
-                                <div class="flex items-center gap-2 ml-4">
-                                    <!-- View Button -->
-                                    <Link :href="contactShow(submission.id).url">
-                                        <Button variant="outline" size="sm">
-                                            <Eye class="h-4 w-4 mr-1" />
-                                            View
-                                        </Button>
-                                    </Link>
+                                    <!-- Date -->
+                                    <TableCell class="text-sm text-gray-500">
+                                        <div class="flex flex-col">
+                                            <span>{{ new Date(submission.created_at).toLocaleDateString() }}</span>
+                                            <span class="text-xs">{{ new Date(submission.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) }}</span>
+                                        </div>
+                                    </TableCell>
 
-                                    <!-- Toggle Read Button -->
-                                    <Button 
-                                        @click="toggleRead(submission)"
-                                        variant="outline" 
-                                        size="sm"
-                                        :class="isReadByCurrentUser(submission) ? 'text-gray-600' : 'text-blue-600'"
-                                    >
-                                        <EyeOff v-if="isReadByCurrentUser(submission)" class="h-4 w-4 mr-1" />
-                                        <Eye v-else class="h-4 w-4 mr-1" />
-                                        {{ isReadByCurrentUser(submission) ? 'Unread' : 'Mark Read' }}
-                                    </Button>
+                                    <!-- Read By Count -->
+                                    <TableCell class="text-center">
+                                        <div class="flex items-center justify-center gap-1">
+                                            <Eye class="h-3 w-3 text-gray-400" />
+                                            <span class="text-sm">{{ submission.reads_with_users.length }}</span>
+                                        </div>
+                                        <div v-if="submission.reads_with_users.length > 0" class="flex justify-center -space-x-1 mt-1">
+                                            <Avatar 
+                                                v-for="read in submission.reads_with_users.slice(0, 3)" 
+                                                :key="read.id" 
+                                                class="h-5 w-5 border border-white"
+                                            >
+                                                <AvatarFallback class="text-xs bg-green-100 text-green-800">
+                                                    {{ getInitials(read.user.name) }}
+                                                </AvatarFallback>
+                                            </Avatar>
+                                            <div v-if="submission.reads_with_users.length > 3" 
+                                                 class="h-5 w-5 rounded-full bg-gray-200 border border-white flex items-center justify-center">
+                                                <span class="text-xs text-gray-600">+{{ submission.reads_with_users.length - 3 }}</span>
+                                            </div>
+                                        </div>
+                                    </TableCell>
 
-                                    <!-- Delete Button -->
-                                    <Button 
-                                        @click="deleteSubmission(submission)"
-                                        variant="destructive" 
-                                        size="sm"
-                                    >
-                                        <Trash2 class="h-4 w-4 mr-1" />
-                                        Delete
-                                    </Button>
-                                </div>
-                            </div>
-                        </CardContent>
-                    </Card>
-                </div>
+                                    <!-- Actions -->
+                                    <TableCell>
+                                        <div class="flex items-center justify-end gap-1">
+                                            <!-- View Button -->
+                                            <Link :href="contactShow(submission.id).url">
+                                                <Button variant="ghost" size="sm" class="h-8 w-8 p-0">
+                                                    <Eye class="h-4 w-4" />
+                                                </Button>
+                                            </Link>
+
+                                            <!-- Toggle Read Button -->
+                                            <Button 
+                                                @click="toggleRead(submission)"
+                                                variant="ghost" 
+                                                size="sm"
+                                                class="h-auto px-2 py-1"
+                                            >
+                                                <Badge v-if="isReadByCurrentUser(submission)" 
+                                                       variant="secondary" 
+                                                       class="text-xs">
+                                                    Read
+                                                </Badge>
+                                                <span v-else 
+                                                      class="text-xs text-blue-600 hover:text-blue-800">
+                                                    Unread
+                                                </span>
+                                            </Button>
+
+                                            <!-- Delete Button -->
+                                            <Button 
+                                                @click="deleteSubmission(submission)"
+                                                variant="ghost" 
+                                                size="sm"
+                                                class="h-8 w-8 p-0 text-red-600 hover:text-red-800"
+                                            >
+                                                <Trash2 class="h-4 w-4" />
+                                            </Button>
+                                        </div>
+                                    </TableCell>
+                                </TableRow>
+                            </TableBody>
+                        </Table>
+                    </CardContent>
+                </Card>
 
                 <!-- Pagination -->
                 <div v-if="submissions.links && submissions.links.length > 3" class="mt-6">
