@@ -2,11 +2,14 @@
 
 namespace App\Providers;
 
+use App\Models\User;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Laravel\Fortify\Features;
 use Laravel\Fortify\Fortify;
@@ -28,6 +31,8 @@ class FortifyServiceProvider extends ServiceProvider
     {
         $this->configureViews();
         $this->configureRateLimiting();
+        $this->configureRedirects();
+        $this->configureAuthentication();
     }
 
     /**
@@ -58,6 +63,51 @@ class FortifyServiceProvider extends ServiceProvider
             $throttleKey = Str::transliterate(Str::lower($request->input(Fortify::username())).'|'.$request->ip());
 
             return Limit::perMinute(5)->by($throttleKey);
+        });
+    }
+
+    /**
+     * Configure post-login redirects based on user role.
+     */
+    private function configureRedirects(): void
+    {
+        Fortify::redirects('login', function () {
+            $user = auth()->user();
+
+            if ($user->hasRole('superadmin')) {
+                return route('superadmin.dashboard');
+            } elseif ($user->hasRole('admin')) {
+                return route('admin.dashboard');
+            } elseif ($user->hasRole('user')) {
+                return route('user.dashboard');
+            }
+
+            return route('dashboard');
+        });
+    }
+
+    /**
+     * Configure custom authentication logic.
+     */
+    private function configureAuthentication(): void
+    {
+        Fortify::authenticateUsing(function (Request $request) {
+            $user = User::where('email', $request->email)->first();
+
+            if ($user && Hash::check($request->password, $user->password)) {
+                // Check if user is deactivated (soft deleted)
+                if ($user->deleted_at) {
+                    throw ValidationException::withMessages([
+                        Fortify::username() => [
+                            'Your account has been deactivated. Please contact the administrator for assistance.'
+                        ],
+                    ]);
+                }
+
+                return $user;
+            }
+
+            return null;
         });
     }
 }

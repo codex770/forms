@@ -31,10 +31,14 @@ import {
 import UserMenuContent from '@/components/UserMenuContent.vue';
 import { getInitials } from '@/composables/useInitials';
 import { toUrl, urlIsActive } from '@/lib/utils';
-import { dashboard } from '@/routes';
+import { dashboard as superadminDashboard } from '@/routes/superadmin';
+import { dashboard as adminDashboard } from '@/routes/admin';
+import { dashboard as userDashboard } from '@/routes/user';
+import { index as usersIndex } from '@/routes/users';
+import { index as contactIndex } from '@/routes/contact';
 import type { BreadcrumbItem, NavItem } from '@/types';
 import { InertiaLinkProps, Link, usePage } from '@inertiajs/vue3';
-import { BookOpen, Folder, LayoutGrid, Menu, Search } from 'lucide-vue-next';
+import { LayoutGrid, Menu, Search, Users, MessageSquare } from 'lucide-vue-next';
 import { computed } from 'vue';
 
 interface Props {
@@ -47,6 +51,7 @@ const props = withDefaults(defineProps<Props>(), {
 
 const page = usePage();
 const auth = computed(() => page.props.auth);
+const user = computed(() => page.props.auth.user);
 
 const isCurrentRoute = computed(
     () => (url: NonNullable<InertiaLinkProps['href']>) =>
@@ -60,26 +65,49 @@ const activeItemStyles = computed(
             : '',
 );
 
-const mainNavItems: NavItem[] = [
-    {
-        title: 'Dashboard',
-        href: dashboard(),
-        icon: LayoutGrid,
-    },
-];
+const userHasRole = (roleName: string): boolean => {
+    return user.value.roles?.some(role => role.name === roleName) ?? false;
+};
 
-const rightNavItems: NavItem[] = [
-    {
-        title: 'Repository',
-        href: 'https://github.com/laravel/vue-starter-kit',
-        icon: Folder,
-    },
-    {
-        title: 'Documentation',
-        href: 'https://laravel.com/docs/starter-kits#vue',
-        icon: BookOpen,
-    },
-];
+const getDashboardUrl = () => {
+    if (userHasRole('superadmin')) {
+        return superadminDashboard().url;
+    } else if (userHasRole('admin')) {
+        return adminDashboard().url;
+    } else if (userHasRole('user')) {
+        return userDashboard().url;
+    }
+    // Fallback to user dashboard if no role is found
+    return userDashboard().url;
+};
+
+const mainNavItems = computed<NavItem[]>(() => {
+    const items: NavItem[] = [
+        {
+            title: 'Dashboard',
+            href: getDashboardUrl(),
+            icon: LayoutGrid,
+        },
+        {
+            title: 'Contact Messages',
+            href: contactIndex().url,
+            icon: MessageSquare,
+        },
+    ];
+
+    // Add User Management for superadmins
+    if (userHasRole('superadmin')) {
+        items.push({
+            title: 'User Management',
+            href: usersIndex().url,
+            icon: Users,
+        });
+    }
+
+    return items;
+});
+
+const rightNavItems: NavItem[] = [];
 </script>
 
 <template>
@@ -148,7 +176,7 @@ const rightNavItems: NavItem[] = [
                     </Sheet>
                 </div>
 
-                <Link :href="dashboard()" class="flex items-center gap-x-2">
+                <Link :href="getDashboardUrl()" class="flex items-center gap-x-2">
                     <AppLogo />
                 </Link>
 

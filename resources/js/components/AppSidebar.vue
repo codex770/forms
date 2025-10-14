@@ -11,32 +11,63 @@ import {
     SidebarMenuButton,
     SidebarMenuItem,
 } from '@/components/ui/sidebar';
-import { dashboard } from '@/routes';
+import { dashboard as superadminDashboard } from '@/routes/superadmin';
+import { dashboard as adminDashboard } from '@/routes/admin';
+import { dashboard as userDashboard } from '@/routes/user';
+import { index as usersIndex } from '@/routes/users';
+import { index as contactIndex } from '@/routes/contact';
 import { type NavItem } from '@/types';
-import { Link } from '@inertiajs/vue3';
-import { BookOpen, Folder, LayoutGrid } from 'lucide-vue-next';
+import { Link, usePage } from '@inertiajs/vue3';
+import { LayoutGrid, Users, MessageSquare } from 'lucide-vue-next';
+import { computed } from 'vue';
 import AppLogo from './AppLogo.vue';
 
-const mainNavItems: NavItem[] = [
-    {
-        title: 'Dashboard',
-        href: dashboard(),
-        icon: LayoutGrid,
-    },
-];
+const page = usePage();
+const user = computed(() => page.props.auth.user);
 
-const footerNavItems: NavItem[] = [
-    {
-        title: 'Github Repo',
-        href: 'https://github.com/laravel/vue-starter-kit',
-        icon: Folder,
-    },
-    {
-        title: 'Documentation',
-        href: 'https://laravel.com/docs/starter-kits#vue',
-        icon: BookOpen,
-    },
-];
+const userHasRole = (roleName: string): boolean => {
+    return user.value.roles?.some(role => role.name === roleName) ?? false;
+};
+
+const getDashboardUrl = () => {
+    if (userHasRole('superadmin')) {
+        return superadminDashboard().url;
+    } else if (userHasRole('admin')) {
+        return adminDashboard().url;
+    } else if (userHasRole('user')) {
+        return userDashboard().url;
+    }
+    // Fallback to user dashboard if no role is found
+    return userDashboard().url;
+};
+
+const mainNavItems = computed<NavItem[]>(() => {
+    const items: NavItem[] = [
+        {
+            title: 'Dashboard',
+            href: getDashboardUrl(),
+            icon: LayoutGrid,
+        },
+        {
+            title: 'Contact Messages',
+            href: contactIndex().url,
+            icon: MessageSquare,
+        },
+    ];
+
+    // Add User Management for superadmins
+    if (userHasRole('superadmin')) {
+        items.push({
+            title: 'User Management',
+            href: usersIndex().url,
+            icon: Users,
+        });
+    }
+
+    return items;
+});
+
+const footerNavItems: NavItem[] = [];
 </script>
 
 <template>
@@ -45,7 +76,7 @@ const footerNavItems: NavItem[] = [
             <SidebarMenu>
                 <SidebarMenuItem>
                     <SidebarMenuButton size="lg" as-child>
-                        <Link :href="dashboard()">
+                        <Link :href="getDashboardUrl()">
                             <AppLogo />
                         </Link>
                     </SidebarMenuButton>
