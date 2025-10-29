@@ -30,9 +30,9 @@ interface ContactSubmission {
     id: number;
     category: string;
     data: {
-        name: string;
-        email: string;
-        description: string;
+        name?: string;
+        email?: string;
+        description?: string;
         [key: string]: any;
     };
     ip_address: string;
@@ -78,8 +78,9 @@ const isReadByCurrentUser = (submission: ContactSubmission): boolean => {
     return submission.reads_with_users.some(read => read.user_id === authUser.value?.id);
 };
 
-// Get initials for avatar
-const getInitials = (name: string): string => {
+// Get initials for avatar - handles missing name gracefully
+const getInitials = (name: string | undefined): string => {
+    if (!name || typeof name !== 'string') return '??';
     return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
 };
 
@@ -100,10 +101,28 @@ const getCategoryName = (category: string): string => {
     return props.categories[category] || category;
 };
 
-// Get message preview (only 3 words)
-const getMessagePreview = (description: string): string => {
+// Get message preview (only 3 words) - handles missing description gracefully
+const getMessagePreview = (description: string | undefined): string => {
+    if (!description || typeof description !== 'string') {
+        return 'No message preview available';
+    }
     const words = description.split(' ').slice(0, 3);
     return words.length >= 3 ? words.join(' ') + '...' : description;
+};
+
+// Get display name - tries name, email, or falls back to ID
+const getDisplayName = (data: any): string => {
+    return data?.name || data?.email || data?.full_name || data?.contact_name || 'Unknown';
+};
+
+// Get display email - tries email or returns placeholder
+const getDisplayEmail = (data: any): string => {
+    return data?.email || data?.email_address || 'No email provided';
+};
+
+// Get message text - tries description, message, or any text field
+const getMessageText = (data: any): string => {
+    return data?.description || data?.message || data?.content || data?.text || 'No message content';
 };
 
 // Apply filters
@@ -327,15 +346,15 @@ onMounted(() => {
                                         <div class="flex items-center gap-3">
                                             <Avatar class="h-8 w-8 hidden sm:flex">
                                                 <AvatarFallback class="text-xs">
-                                                    {{ getInitials(submission.data.name) }}
+                                                    {{ getInitials(getDisplayName(submission.data)) }}
                                                 </AvatarFallback>
                                             </Avatar>
                                             <div class="min-w-0 flex-1">
                                                 <div class="font-medium text-gray-900 truncate">
-                                                    {{ submission.data.name }}
+                                                    {{ getDisplayName(submission.data) }}
                                                 </div>
                                                 <div class="text-sm text-gray-500 truncate">
-                                                    {{ submission.data.email }}
+                                                    {{ getDisplayEmail(submission.data) }}
                                                 </div>
                                             </div>
                                         </div>
@@ -352,7 +371,7 @@ onMounted(() => {
                                     <TableCell class="hidden md:table-cell">
                                         <div class="max-w-xs">
                                             <p class="text-sm text-gray-700">
-                                                {{ getMessagePreview(submission.data.description) }}
+                                                {{ getMessagePreview(getMessageText(submission.data)) }}
                                             </p>
                                         </div>
                                     </TableCell>

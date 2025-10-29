@@ -6,7 +6,6 @@ use App\Models\ContactSubmission;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Validator;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -70,29 +69,24 @@ class ContactController extends Controller
 
     /**
      * Handle the submission for any category.
+     * Accepts any JSON data and stores it as-is in the database.
      */
     private function handleSubmission(Request $request, string $category): JsonResponse
     {
-        // Basic validation for required fields
-        $validator = Validator::make($request->all(), [
-            'name' => 'required|string|max:255',
-            'email' => 'required|email|max:255',
-            'description' => 'required|string|max:5000',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Validation failed',
-                'errors' => $validator->errors()
-            ], 422);
-        }
-
         try {
+            // Get all request data (accepts any JSON structure)
+            // Try to get JSON body first, fallback to all request data
+            $data = $request->json()->all();
+            
+            // If JSON body is empty, try getting all request data (fallback for form-data)
+            if (empty($data)) {
+                $data = $request->all();
+            }
+
             // Store all request data as JSON
             $submission = ContactSubmission::create([
                 'category' => $category,
-                'data' => $request->all(),
+                'data' => $data,
                 'ip_address' => $request->ip(),
             ]);
 
@@ -121,10 +115,14 @@ class ContactController extends Controller
 
         $query = ContactSubmission::with(['readsWithUsers'])
             ->when($search, function ($q, $search) {
+                // Search across all JSON fields - search in common fields and also search the entire JSON string
                 $q->where(function ($query) use ($search) {
+                    // Search in common fields first (for performance with indexed lookups)
                     $query->whereJsonContains('data->name', $search)
                           ->orWhereJsonContains('data->email', $search)
-                          ->orWhereJsonContains('data->description', $search);
+                          ->orWhereJsonContains('data->description', $search)
+                          // Also search the entire JSON data column as text for broader search
+                          ->orWhereRaw('CAST(data AS CHAR) LIKE ?', ["%{$search}%"]);
                 });
             })
             ->when($category, function ($q, $category) {

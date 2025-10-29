@@ -28,9 +28,9 @@ interface ContactSubmission {
     id: number;
     category: string;
     data: {
-        name: string;
-        email: string;
-        description: string;
+        name?: string;
+        email?: string;
+        description?: string;
         [key: string]: any;
     };
     ip_address: string;
@@ -60,9 +60,25 @@ const isReadByCurrentUser = computed((): boolean => {
     return props.submission.reads_with_users.some(read => read.user_id === authUser.value?.id);
 });
 
-// Get initials for avatar
-const getInitials = (name: string): string => {
+// Get initials for avatar - handles missing name gracefully
+const getInitials = (name: string | undefined): string => {
+    if (!name || typeof name !== 'string') return '??';
     return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
+};
+
+// Get display name - tries various name fields
+const getDisplayName = (data: any): string => {
+    return data?.name || data?.full_name || data?.contact_name || data?.email || 'Unknown';
+};
+
+// Get display email - tries email fields
+const getDisplayEmail = (data: any): string | null => {
+    return data?.email || data?.email_address || null;
+};
+
+// Get message text - tries various message/description fields
+const getMessageText = (data: any): string => {
+    return data?.description || data?.message || data?.content || data?.text || 'No message content available';
 };
 
 // Get category badge variant
@@ -103,17 +119,24 @@ const deleteSubmission = () => {
     }
 };
 
-// Format additional data for display
+// Format additional data for display (excludes common fields we show separately)
 const formatAdditionalData = computed(() => {
-    const { name, email, description, ...additionalData } = props.submission.data;
-    return Object.entries(additionalData).filter(([key, value]) => 
-        value !== null && value !== undefined && value !== ''
-    );
+    const excludedFields = ['name', 'email', 'description', 'message', 'content', 'text', 'full_name', 'contact_name', 'email_address', 'category'];
+    return Object.entries(props.submission.data)
+        .filter(([key, value]) => 
+            !excludedFields.includes(key.toLowerCase()) &&
+            value !== null && value !== undefined && value !== ''
+        );
+});
+
+// Get all data fields (for display purposes)
+const allDataFields = computed(() => {
+    return Object.entries(props.submission.data);
 });
 </script>
 
 <template>
-    <Head :title="`Contact Message from ${submission.data.name}`" />
+    <Head :title="`Contact Message #${submission.id}`" />
 
     <AppLayout>
         <div class="py-6">
@@ -149,7 +172,7 @@ const formatAdditionalData = computed(() => {
                             </div>
 
                             <h1 class="text-3xl font-bold text-gray-900">
-                                Message from {{ submission.data.name }}
+                                Message from {{ getDisplayName(submission.data) }}
                             </h1>
                             <p class="mt-2 text-gray-600">
                                 Submitted {{ new Date(submission.created_at).toLocaleString() }}
@@ -194,34 +217,37 @@ const formatAdditionalData = computed(() => {
                             </CardHeader>
                             <CardContent>
                                 <div class="prose prose-gray max-w-none">
-                                    <p class="text-gray-900 leading-relaxed whitespace-pre-wrap">{{ submission.data.description }}</p>
+                                    <p class="text-gray-900 leading-relaxed whitespace-pre-wrap">{{ getMessageText(submission.data) }}</p>
                                 </div>
                             </CardContent>
                         </Card>
 
-                        <!-- Additional Data (if any) -->
-                        <Card v-if="formatAdditionalData.length > 0">
+                        <!-- All Form Data -->
+                        <Card v-if="allDataFields.length > 0">
                             <CardHeader>
-                                <CardTitle>Additional Information</CardTitle>
+                                <CardTitle>Form Data</CardTitle>
                                 <CardDescription>
-                                    Extra data submitted with this message
+                                    All fields submitted with this message
                                 </CardDescription>
                             </CardHeader>
                             <CardContent>
                                 <div class="space-y-3">
                                     <div 
-                                        v-for="[key, value] in formatAdditionalData" 
+                                        v-for="[key, value] in allDataFields" 
                                         :key="key"
                                         class="flex justify-between items-start py-2 border-b border-gray-100 last:border-b-0"
                                     >
                                         <div class="font-medium text-gray-700 capitalize">
                                             {{ key.replace(/[_-]/g, ' ') }}:
                                         </div>
-                                        <div class="text-gray-900 text-right max-w-xs">
-                                            <span v-if="typeof value === 'object'">
-                                                {{ JSON.stringify(value, null, 2) }}
+                                        <div class="text-gray-900 text-right max-w-xs break-words">
+                                            <span v-if="typeof value === 'object' && value !== null">
+                                                <pre class="text-xs bg-gray-50 p-2 rounded">{{ JSON.stringify(value, null, 2) }}</pre>
                                             </span>
-                                            <span v-else>{{ value }}</span>
+                                            <span v-else-if="value === null || value === undefined" class="text-gray-400 italic">
+                                                (empty)
+                                            </span>
+                                            <span v-else class="break-all">{{ value }}</span>
                                         </div>
                                     </div>
                                 </div>
@@ -254,12 +280,12 @@ const formatAdditionalData = computed(() => {
                                 <div class="flex items-center gap-3">
                                     <Avatar class="h-12 w-12">
                                         <AvatarFallback class="text-lg">
-                                            {{ getInitials(submission.data.name) }}
+                                            {{ getInitials(getDisplayName(submission.data)) }}
                                         </AvatarFallback>
                                     </Avatar>
                                     <div>
                                         <div class="font-medium text-gray-900">
-                                            {{ submission.data.name }}
+                                            {{ getDisplayName(submission.data) }}
                                         </div>
                                     </div>
                                 </div>
@@ -267,16 +293,22 @@ const formatAdditionalData = computed(() => {
                                 <Separator />
 
                                 <!-- Email -->
-                                <div class="flex items-center gap-3">
+                                <div v-if="getDisplayEmail(submission.data)" class="flex items-center gap-3">
                                     <Mail class="h-4 w-4 text-gray-400" />
                                     <div class="flex-1">
                                         <div class="text-sm text-gray-500">Email</div>
                                         <a 
-                                            :href="`mailto:${submission.data.email}`" 
+                                            :href="`mailto:${getDisplayEmail(submission.data)}`" 
                                             class="text-blue-600 hover:text-blue-800"
                                         >
-                                            {{ submission.data.email }}
+                                            {{ getDisplayEmail(submission.data) }}
                                         </a>
+                                    </div>
+                                </div>
+                                <div v-else class="flex items-center gap-3 text-gray-400">
+                                    <Mail class="h-4 w-4" />
+                                    <div class="flex-1">
+                                        <div class="text-sm">No email provided</div>
                                     </div>
                                 </div>
 
@@ -356,7 +388,8 @@ const formatAdditionalData = computed(() => {
                             <CardContent class="space-y-2">
                                 <!-- Reply via Email -->
                                 <a 
-                                    :href="`mailto:${submission.data.email}?subject=Re: Your contact message&body=Hi ${submission.data.name},%0D%0A%0D%0AThank you for your message. `"
+                                    v-if="getDisplayEmail(submission.data)"
+                                    :href="`mailto:${getDisplayEmail(submission.data)}?subject=Re: Your contact message&body=Hi ${getDisplayName(submission.data)},%0D%0A%0D%0AThank you for your message. `"
                                     class="w-full"
                                 >
                                     <Button variant="outline" size="sm" class="w-full justify-start">
@@ -364,6 +397,16 @@ const formatAdditionalData = computed(() => {
                                         Reply via Email
                                     </Button>
                                 </a>
+                                <Button 
+                                    v-else
+                                    variant="outline" 
+                                    size="sm" 
+                                    class="w-full justify-start"
+                                    disabled
+                                >
+                                    <Mail class="mr-2 h-4 w-4" />
+                                    No Email Available
+                                </Button>
 
                                 <!-- Toggle Read Status -->
                                 <Button 

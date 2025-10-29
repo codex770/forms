@@ -23,6 +23,15 @@ return Application::configure(basePath: dirname(__DIR__))
             \App\Http\Middleware\CheckUserActive::class,
         ]);
 
+        // Replace default CSRF middleware with custom one
+        $middleware->validateCsrfTokens(except: [
+            'contact/bigfm',
+            'contact/rpr1',
+            'contact/regenbogen',
+            'contact/rockfm',
+            'contact/bigkarriere',
+        ]);
+
         // Register Spatie Permission middleware
         $middleware->alias([
             'role' => \Spatie\Permission\Middleware\RoleMiddleware::class,
