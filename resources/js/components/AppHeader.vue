@@ -88,11 +88,6 @@ const mainNavItems = computed<NavItem[]>(() => {
             href: getDashboardUrl(),
             icon: LayoutGrid,
         },
-        {
-            title: 'Contact Messages',
-            href: contactIndex().url,
-            icon: MessageSquare,
-        },
     ];
 
     // Add User Management for superadmins

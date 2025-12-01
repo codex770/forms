@@ -110,9 +110,23 @@ const getMessagePreview = (description: string | undefined): string => {
     return words.length >= 3 ? words.join(' ') + '...' : description;
 };
 
-// Get display name - tries name, email, or falls back to ID
+// Get display name - handles multiple name field variations
 const getDisplayName = (data: any): string => {
-    return data?.name || data?.email || data?.full_name || data?.contact_name || 'Unknown';
+    // Try to combine first and last name
+    if (data?.fname && data?.lname) {
+        return `${data.fname} ${data.lname}`;
+    }
+    if (data?.first_name && data?.last_name) {
+        return `${data.first_name} ${data.last_name}`;
+    }
+    // Try single name fields
+    return data?.name 
+        || data?.fname 
+        || data?.first_name 
+        || data?.full_name 
+        || data?.contact_name 
+        || data?.email 
+        || 'Unknown';
 };
 
 // Get display email - tries email or returns placeholder
@@ -120,9 +134,16 @@ const getDisplayEmail = (data: any): string => {
     return data?.email || data?.email_address || 'No email provided';
 };
 
-// Get message text - tries description, message, or any text field
+// Get message text - handles multiple message field variations
 const getMessageText = (data: any): string => {
-    return data?.description || data?.message || data?.content || data?.text || 'No message content';
+    // Prefer message_long, then message_short, then other fields
+    return data?.message_long 
+        || data?.message_short 
+        || data?.description 
+        || data?.message 
+        || data?.content 
+        || data?.text 
+        || 'No message content';
 };
 
 // Apply filters

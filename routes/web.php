@@ -53,6 +53,19 @@ Route::post('contact/bigkarriere', [App\Http\Controllers\ContactController::clas
 
 // Authenticated contact management routes (all authenticated users can access)
 Route::middleware(['auth', 'verified'])->group(function () {
+    // Form detail view - shows submissions for a specific webform_id
+    Route::get('forms/{webformId}', [App\Http\Controllers\ContactController::class, 'showFormDetail'])->name('forms.detail');
+    
+    // User table preferences API
+    Route::prefix('api/preferences')->group(function () {
+        Route::get('/', [App\Http\Controllers\UserTablePreferenceController::class, 'index'])->name('preferences.index');
+        Route::post('/', [App\Http\Controllers\UserTablePreferenceController::class, 'store'])->name('preferences.store');
+        Route::get('{preference}', [App\Http\Controllers\UserTablePreferenceController::class, 'show'])->name('preferences.show');
+        Route::put('{preference}', [App\Http\Controllers\UserTablePreferenceController::class, 'update'])->name('preferences.update');
+        Route::delete('{preference}', [App\Http\Controllers\UserTablePreferenceController::class, 'destroy'])->name('preferences.destroy');
+        Route::post('{preference}/load', [App\Http\Controllers\UserTablePreferenceController::class, 'load'])->name('preferences.load');
+    });
+    
     Route::get('contact-messages', [App\Http\Controllers\ContactController::class, 'index'])->name('contact.index');
     Route::get('contact-messages/{submission}', [App\Http\Controllers\ContactController::class, 'show'])->name('contact.show');
     Route::post('contact-messages/{submission}/toggle-read', [App\Http\Controllers\ContactController::class, 'toggleRead'])->name('contact.toggle-read');

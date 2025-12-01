@@ -7,6 +7,7 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Separator } from '@/components/ui/separator';
 import { Head, Link, router, usePage } from '@inertiajs/vue3';
 import { index as contactIndex, toggleRead as contactToggleRead, destroy as contactDestroy } from '@/routes/contact';
+import { computed as vueComputed } from 'vue';
 import { 
     ArrowLeft, 
     Eye, 
@@ -55,6 +56,26 @@ const props = defineProps<Props>();
 
 const authUser = computed(() => usePage().props.auth.user);
 
+// Get query parameters to determine where to go back
+const urlParams = new URLSearchParams(window.location.search);
+const fromPage = urlParams.get('from');
+const webformId = urlParams.get('webform_id');
+
+// Determine back URL
+const backUrl = computed(() => {
+    if (fromPage === 'forms' && webformId) {
+        return `/forms/${webformId}`;
+    }
+    return contactIndex().url; // Fallback to old contact messages page
+});
+
+const backButtonText = computed(() => {
+    if (fromPage === 'forms') {
+        return 'Back to Form';
+    }
+    return 'Back to Messages';
+});
+
 // Check if current user has read the submission
 const isReadByCurrentUser = computed((): boolean => {
     return props.submission.reads_with_users.some(read => read.user_id === authUser.value?.id);
@@ -66,9 +87,23 @@ const getInitials = (name: string | undefined): string => {
     return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
 };
 
-// Get display name - tries various name fields
+// Get display name - handles multiple name field variations
 const getDisplayName = (data: any): string => {
-    return data?.name || data?.full_name || data?.contact_name || data?.email || 'Unknown';
+    // Try to combine first and last name
+    if (data?.fname && data?.lname) {
+        return `${data.fname} ${data.lname}`;
+    }
+    if (data?.first_name && data?.last_name) {
+        return `${data.first_name} ${data.last_name}`;
+    }
+    // Try single name fields
+    return data?.name 
+        || data?.fname 
+        || data?.first_name 
+        || data?.full_name 
+        || data?.contact_name 
+        || data?.email 
+        || 'Unknown';
 };
 
 // Get display email - tries email fields
@@ -76,9 +111,16 @@ const getDisplayEmail = (data: any): string | null => {
     return data?.email || data?.email_address || null;
 };
 
-// Get message text - tries various message/description fields
+// Get message text - handles multiple message field variations
 const getMessageText = (data: any): string => {
-    return data?.description || data?.message || data?.content || data?.text || 'No message content available';
+    // Prefer message_long, then message_short, then other fields
+    return data?.message_long 
+        || data?.message_short 
+        || data?.description 
+        || data?.message 
+        || data?.content 
+        || data?.text 
+        || 'No message content available';
 };
 
 // Get category badge variant
@@ -144,10 +186,10 @@ const allDataFields = computed(() => {
                 <!-- Header -->
                 <div class="mb-8">
                     <div class="flex items-center gap-4 mb-4">
-                        <Link :href="contactIndex().url">
+                        <Link :href="backUrl">
                             <Button variant="outline" size="sm">
                                 <ArrowLeft class="mr-2 h-4 w-4" />
-                                Back to Messages
+                                {{ backButtonText }}
                             </Button>
                         </Link>
                     </div>

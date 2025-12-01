@@ -12,6 +12,9 @@ class ContactSubmission extends Model
 
     protected $fillable = [
         'category',
+        'webform_id',
+        'submission_form',
+        'station',
         'data',
         'ip_address',
     ];
