@@ -59,11 +59,11 @@ interface ContactSubmission {
     }>;
 }
 
-interface FieldInfo {
+type FieldInfo = {
     key: string;
-    type: string;
+    type: 'string' | 'boolean' | 'object' | 'integer' | 'float' | 'date';
     label: string;
-}
+};
 
 interface Props {
     webformId: string;
@@ -320,8 +320,8 @@ const toggleAllRows = () => {
 
 // Check if all rows are selected
 const allRowsSelected = computed(() => {
-    return props.submissions.data?.length > 0 && 
-           selectedRows.value.size === props.submissions.data.length;
+    const total = props.submissions.data?.length ?? 0;
+    return total > 0 && selectedRows.value.size === total;
 });
 
 // Start editing a row
@@ -538,7 +538,7 @@ const saveColumnPreferences = async (): Promise<boolean> => {
 
 // Load preferences (wrapper to use composable)
 const loadPreferencesWrapper = async () => {
-            await loadPreferences();
+    await loadPreferences();
 };
 
 // Removed preset functions - using single auto-saving preference
@@ -555,6 +555,15 @@ const toggleSort = (column: string) => {
 };
 
 // Removed preset button handler - using single auto-saving preference
+
+// Click handler wrapper to keep template clean and typed
+const onFieldCheckboxClick = (fieldKey: string, e?: MouseEvent) => {
+    e?.preventDefault();
+    e?.stopPropagation();
+    handleFieldCheckboxChange(fieldKey).catch(err => {
+        console.error('Error in handleFieldCheckboxChange:', err);
+    });
+};
 
 onMounted(async () => {
     // Test: Verify visibleFields is initialized
@@ -685,30 +694,8 @@ onMounted(async () => {
                                             >
                                     <Checkbox 
                                                     :checked="visibleFieldsSet.has(field.key)"
-                                                    @click="(e) => {
-                                                        e.preventDefault();
-                                                        e.stopPropagation();
-                                                        console.log('=== CHECKBOX CLICK EVENT ===');
-                                                        console.log('Field key:', field.key);
-                                                        console.log('visibleFields ref:', visibleFields);
-                                                        if (!visibleFields) {
-                                                            console.error('❌ visibleFields ref is undefined!');
-                                                            return;
-                                                        }
-                                                        // In template, Vue auto-unwraps refs, so visibleFields is already the Set
-                                                        // But in event handlers, we need to check if it's a ref
-                                                        const fieldsSet = visibleFields.value || visibleFields;
-                                                        if (!fieldsSet) {
-                                                            console.error('❌ visibleFields.value is undefined!');
-                                                            return;
-                                                        }
-                                                        console.log('Current checked state:', fieldsSet.has(field.key));
-                                                        console.log('Calling handleFieldCheckboxChange...');
-                                                        handleFieldCheckboxChange(field.key).catch(err => {
-                                                            console.error('Error in handleFieldCheckboxChange:', err);
-                                                        });
-                                                    }"
-                                                />
+                                                    @click="(e: MouseEvent) => onFieldCheckboxClick(field.key, e)"
+                                    />
                                                 <span class="text-sm">{{ field.label }}</span>
                                                 <Badge 
                                                     v-if="isNewField(field.key)" 
