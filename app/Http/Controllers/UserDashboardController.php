@@ -22,7 +22,7 @@ class UserDashboardController extends Controller
             'bigkarriere' => 'BigKarriere',
         ];
 
-        // Get all unique webforms with their counts, grouped by station
+        // Get all unique webforms with their counts, grouped by station and type
         $webforms = ContactSubmission::selectRaw('
                 station,
                 webform_id,
@@ -41,32 +41,49 @@ class UserDashboardController extends Controller
             $groupedForms[$stationKey] = [
                 'station' => $stationKey,
                 'stationName' => $stationName,
-                'forms' => [],
+                'types' => [],
                 'totalCount' => 0,
             ];
         }
 
-        // Add forms to their respective stations
+        // Group forms by station → type → forms
         foreach ($webforms as $form) {
             $station = $form->station ?? 'unknown';
+            $submissionForm = $form->submission_form ?? 'Uncategorized';
             
             // If station doesn't exist in our predefined list, add it
             if (!isset($groupedForms[$station])) {
                 $groupedForms[$station] = [
                     'station' => $station,
                     'stationName' => ucfirst($station),
+                    'types' => [],
+                    'totalCount' => 0,
+                ];
+            }
+            
+            // Initialize type if it doesn't exist
+            if (!isset($groupedForms[$station]['types'][$submissionForm])) {
+                $groupedForms[$station]['types'][$submissionForm] = [
+                    'type' => $submissionForm,
                     'forms' => [],
                     'totalCount' => 0,
                 ];
             }
             
-            $groupedForms[$station]['forms'][] = [
+            // Add form to type
+            $groupedForms[$station]['types'][$submissionForm]['forms'][] = [
                 'webform_id' => $form->webform_id,
                 'name' => $form->submission_form ?? $form->webform_id,
                 'count' => $form->count,
             ];
             
+            $groupedForms[$station]['types'][$submissionForm]['totalCount'] += $form->count;
             $groupedForms[$station]['totalCount'] += $form->count;
+        }
+
+        // Convert types from associative array to indexed array
+        foreach ($groupedForms as $stationKey => $stationData) {
+            $groupedForms[$stationKey]['types'] = array_values($stationData['types']);
         }
 
         return Inertia::render('UserDashboard', [

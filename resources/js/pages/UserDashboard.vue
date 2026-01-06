@@ -14,10 +14,16 @@ interface WebForm {
     count: number;
 }
 
+interface FormType {
+    type: string;
+    forms: WebForm[];
+    totalCount: number;
+}
+
 interface Station {
     station: string;
     stationName: string;
-    forms: WebForm[];
+    types: FormType[];
     totalCount: number;
 }
 
@@ -108,7 +114,7 @@ const getFormUrl = (webformId: string): string => {
                                 <div>
                                     <CardTitle class="text-lg font-bold">{{ station.stationName }}</CardTitle>
                                     <div class="text-xs mt-0.5 opacity-90">
-                                        {{ station.forms.length }} forms • {{ station.totalCount }} entries
+                                        {{ station.types?.reduce((sum, type) => sum + type.forms.length, 0) || 0 }} forms • {{ station.totalCount }} entries
                                     </div>
                                 </div>
                             </div>
@@ -118,10 +124,10 @@ const getFormUrl = (webformId: string): string => {
                         </div>
                     </CardHeader>
 
-                    <!-- Forms Table (Compact) -->
+                    <!-- Forms by Type -->
                     <CardContent class="p-0 flex-1">
                         <!-- Empty State -->
-                        <div v-if="station.forms.length === 0" class="flex flex-col items-center justify-center py-8 text-center">
+                        <div v-if="!station.types || station.types.length === 0" class="flex flex-col items-center justify-center py-8 text-center">
                             <FileText class="h-10 w-10 text-muted-foreground/50 mb-2" />
                             <p class="text-sm text-muted-foreground">No forms yet</p>
                             <p class="text-xs text-muted-foreground/70 mt-1">
@@ -129,45 +135,56 @@ const getFormUrl = (webformId: string): string => {
                             </p>
                         </div>
 
-                        <!-- Forms Table -->
-                        <div v-else class="overflow-auto max-h-96">
-                            <table class="w-full text-sm">
-                                <thead class="bg-muted/50 sticky top-0">
-                                    <tr class="border-b">
-                                        <th class="text-left font-medium px-3 py-2 text-xs">Form Name</th>
-                                        <th class="text-right font-medium px-3 py-2 text-xs w-20">Entries</th>
-                                        <th class="w-8"></th>
-                                    </tr>
-                                </thead>
-                                <tbody class="divide-y">
-                                    <tr 
-                                        v-for="form in station.forms" 
-                                        :key="form.webform_id"
-                                        class="hover:bg-muted/50 transition-colors cursor-pointer group"
-                                        @click="$inertia.visit(getFormUrl(form.webform_id))"
-                                    >
-                                        <td class="px-3 py-2">
-                                            <div class="flex items-center gap-2">
-                                                <FileText class="h-3.5 w-3.5 text-muted-foreground group-hover:text-primary transition-colors flex-shrink-0" />
-                                                <div class="min-w-0">
-                                                    <div class="font-medium text-xs truncate group-hover:text-primary transition-colors">
-                                                        {{ form.name }}
-                                                    </div>
-                                                    <div class="text-[10px] text-muted-foreground truncate">
-                                                        {{ form.webform_id }}
+                        <!-- Types and Forms -->
+                        <div v-else-if="station.types && station.types.length > 0" class="overflow-auto max-h-96">
+                            <div v-for="formType in station.types" :key="formType.type" class="border-b last:border-b-0">
+                                <!-- Type Header -->
+                                <div class="bg-muted/30 px-3 py-2 sticky top-0">
+                                    <div class="flex items-center justify-between">
+                                        <span class="text-xs font-semibold text-muted-foreground">{{ formType.type }}</span>
+                                        <span class="text-xs text-muted-foreground">{{ formType.totalCount }} entries</span>
+                                    </div>
+                                </div>
+                                
+                                <!-- Forms in this type -->
+                                <table class="w-full text-sm">
+                                    <thead class="bg-muted/20">
+                                        <tr>
+                                            <th class="text-left font-medium px-3 py-1.5 text-xs">Form Name</th>
+                                            <th class="text-right font-medium px-3 py-1.5 text-xs w-20">Entries</th>
+                                            <th class="w-8"></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="divide-y">
+                                        <tr 
+                                            v-for="form in formType.forms" 
+                                            :key="form.webform_id"
+                                            class="hover:bg-muted/50 transition-colors cursor-pointer group"
+                                            @click="$inertia.visit(getFormUrl(form.webform_id))"
+                                        >
+                                            <td class="px-3 py-2">
+                                                <div class="flex items-center gap-2">
+                                                    <FileText class="h-3.5 w-3.5 text-muted-foreground group-hover:text-primary transition-colors flex-shrink-0" />
+                                                    <div class="min-w-0">
+                                                        <div class="font-medium text-xs truncate group-hover:text-primary transition-colors">
+                                                            {{ form.name }}
+                                                        </div>
+                                                        <div class="text-[10px] text-muted-foreground truncate">
+                                                            {{ form.webform_id }}
+                                                        </div>
                                                     </div>
                                                 </div>
-                                            </div>
-                                        </td>
-                                        <td class="px-3 py-2 text-right">
-                                            <span class="font-semibold text-sm">{{ form.count }}</span>
-                                        </td>
-                                        <td class="px-2 py-2">
-                                            <ArrowRight class="h-3.5 w-3.5 text-muted-foreground group-hover:text-primary group-hover:translate-x-0.5 transition-all" />
-                                        </td>
-                                    </tr>
-                                </tbody>
-                            </table>
+                                            </td>
+                                            <td class="px-3 py-2 text-right">
+                                                <span class="font-semibold text-sm">{{ form.count }}</span>
+                                            </td>
+                                            <td class="px-2 py-2">
+                                                <ArrowRight class="h-3.5 w-3.5 text-muted-foreground group-hover:text-primary group-hover:translate-x-0.5 transition-all" />
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
                         </div>
                     </CardContent>
                 </Card>
@@ -193,7 +210,7 @@ const getFormUrl = (webformId: string): string => {
                     </CardHeader>
                     <CardContent>
                         <div class="text-3xl font-bold">
-                            {{ props.stations.reduce((sum, station) => sum + station.forms.length, 0) }}
+                            {{ props.stations.reduce((sum, station) => sum + station.types.reduce((typeSum, type) => typeSum + type.forms.length, 0), 0) }}
                         </div>
                         <p class="text-xs text-muted-foreground">Active forms</p>
                     </CardContent>

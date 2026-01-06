@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\ContactSubmission;
+use App\Helpers\FormDefaultsHelper;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -98,6 +99,11 @@ class ContactController extends Controller
                 'ip_address' => $request->ip(),
             ]);
 
+            // Detect new fields if webform_id exists (for field detection tracking)
+            if ($webformId) {
+                $this->detectNewFields($webformId, $data);
+            }
+
             return response()->json([
                 'success' => true,
                 'message' => 'Contact form submitted successfully',
@@ -184,6 +190,210 @@ class ContactController extends Controller
     }
 
     /**
+     * Detect available fields from JSON data at different hierarchy levels.
+     * 
+     * Priority: Form-level (most specific) → Type-level → Station-level
+     * Form-level shows only fields from THIS specific form (not union of all forms).
+     */
+    private function detectAvailableFields(?string $webformId = null, ?string $submissionForm = null, ?string $station = null): array
+    {
+        $query = ContactSubmission::query();
+        
+        // PRIORITY 1: Form-level detection (show only THIS form's fields)
+        if ($webformId) {
+            $query->where('webform_id', $webformId);
+            // Get sample submissions from THIS form only (up to 100)
+            $submissions = $query->limit(100)->get();
+        } 
+        // PRIORITY 2: Type-level detection (fallback if form doesn't exist yet)
+        elseif ($submissionForm && $station) {
+            $query->where('submission_form', $submissionForm)
+                  ->where('station', $station);
+            // Get sample submissions from all forms of this type (up to 100)
+            $submissions = $query->limit(100)->get();
+        } 
+        // PRIORITY 3: Station-level detection (fallback)
+        elseif ($station) {
+            $query->where('station', $station);
+            $submissions = $query->limit(100)->get();
+        } else {
+            return [];
+        }
+        
+        $fields = [];
+        $fieldTypes = [];
+        
+        foreach ($submissions as $submission) {
+            $data = $submission->data ?? [];
+            
+            if (is_array($data)) {
+                foreach ($data as $key => $value) {
+                    // Skip system fields that are stored separately
+                    if (in_array($key, ['webform_id', 'submission_form', 'station', 'category'])) {
+                        continue;
+                    }
+                    
+                    if (!isset($fields[$key])) {
+                        $fields[$key] = true;
+                        
+                        // Detect field type
+                        if (is_string($value)) {
+                            // Check if it's a date
+                            if (preg_match('/^\d{4}-\d{2}-\d{2}/', $value) || strtotime($value) !== false) {
+                                $fieldTypes[$key] = 'date';
+                            } else {
+                                $fieldTypes[$key] = 'string';
+                            }
+                        } elseif (is_int($value)) {
+                            $fieldTypes[$key] = 'integer';
+                        } elseif (is_float($value)) {
+                            $fieldTypes[$key] = 'float';
+                        } elseif (is_bool($value)) {
+                            $fieldTypes[$key] = 'boolean';
+                        } elseif (is_array($value) || is_object($value)) {
+                            $fieldTypes[$key] = 'object';
+                        } else {
+                            $fieldTypes[$key] = 'string';
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Convert to array with metadata and remove duplicates by key
+        $result = [];
+        $seenKeys = [];
+        foreach (array_keys($fields) as $field) {
+            // Skip if we've already seen this key (prevent duplicates)
+            if (in_array($field, $seenKeys)) {
+                continue;
+            }
+            $seenKeys[] = $field;
+            
+            $result[] = [
+                'key' => $field,
+                'type' => $fieldTypes[$field] ?? 'string',
+                'label' => $this->getFieldLabel($field),
+            ];
+        }
+        
+        // Sort by label for better UX
+        usort($result, function ($a, $b) {
+            return strcmp($a['label'], $b['label']);
+        });
+        
+        return $result;
+    }
+    
+    /**
+     * Detect new fields in a submission and cache them for notification.
+     * This helps track when new fields are added to existing forms.
+     */
+    private function detectNewFields(string $webformId, array $newData): void
+    {
+        // Get existing fields for this form
+        $existingFields = $this->detectAvailableFields($webformId);
+        $existingKeys = array_column($existingFields, 'key');
+        
+        // Find new fields (fields in newData but not in existingFields)
+        $newFields = [];
+        foreach (array_keys($newData) as $key) {
+            // Skip system fields
+            if (in_array($key, ['webform_id', 'submission_form', 'station', 'category'])) {
+                continue;
+            }
+            
+            // If field doesn't exist in existing fields, it's new
+            if (!in_array($key, $existingKeys)) {
+                $newFields[] = $key;
+            }
+        }
+        
+        // If new fields found, cache them for frontend notification
+        // We'll use cache with a key that includes webform_id and user_id
+        // This allows per-user notifications
+        if (!empty($newFields)) {
+            // Store in cache for 24 hours (users will see notification when they next visit)
+            $cacheKey = "new_fields:{$webformId}";
+            $existingNewFields = \Cache::get($cacheKey, []);
+            $allNewFields = array_unique(array_merge($existingNewFields, $newFields));
+            \Cache::put($cacheKey, $allNewFields, now()->addHours(24));
+        }
+    }
+
+    /**
+     * Get new fields for a webform (fields detected since last visit).
+     */
+    public function getNewFields(string $webformId): array
+    {
+        $cacheKey = "new_fields:{$webformId}";
+        $newFieldKeys = \Cache::get($cacheKey, []);
+        
+        if (empty($newFieldKeys)) {
+            return [];
+        }
+        
+        // Get field metadata for new fields
+        $allFields = $this->detectAvailableFields($webformId);
+        $newFields = [];
+        
+        foreach ($allFields as $field) {
+            if (in_array($field['key'], $newFieldKeys)) {
+                $newFields[] = $field;
+            }
+        }
+        
+        return $newFields;
+    }
+
+    /**
+     * Clear new fields notification for a webform.
+     */
+    public function clearNewFields(string $webformId): void
+    {
+        $cacheKey = "new_fields:{$webformId}";
+        \Cache::forget($cacheKey);
+    }
+
+    /**
+     * Get human-readable label for a field key.
+     */
+    private function getFieldLabel(string $key): string
+    {
+        $labels = [
+            'fname' => 'First Name',
+            'lname' => 'Last Name',
+            'first_name' => 'First Name',
+            'last_name' => 'Last Name',
+            'name' => 'Name',
+            'email' => 'Email',
+            'email_address' => 'Email Address',
+            'phone' => 'Phone',
+            'message_long' => 'Message (Long)',
+            'message_short' => 'Message (Short)',
+            'message' => 'Message',
+            'description' => 'Description',
+            'city' => 'City',
+            'zip' => 'ZIP Code',
+            'zip_code' => 'ZIP Code',
+            'postal_code' => 'Postal Code',
+            'plz' => 'PLZ',
+            'gender' => 'Gender',
+            'age' => 'Age',
+            'birth_year' => 'Birth Year',
+            'birthday' => 'Birthday',
+            'bday' => 'Birthday',
+        ];
+        
+        if (isset($labels[$key])) {
+            return $labels[$key];
+        }
+        
+        // Convert snake_case or camelCase to Title Case
+        return ucwords(str_replace(['_', '-'], ' ', $key));
+    }
+
+    /**
      * Show form detail view with all submissions for a specific webform_id.
      */
     public function showFormDetail(Request $request, string $webformId): Response
@@ -199,6 +409,7 @@ class ContactController extends Controller
 
         $formName = $formInfo->submission_form ?? $webformId;
         $station = $formInfo->station ?? 'unknown';
+        $submissionForm = $formInfo->submission_form;
 
         // Get search and filter parameters
         $search = $request->get('search');
@@ -219,6 +430,7 @@ class ContactController extends Controller
         $sortDirection = $request->get('sort_direction', 'desc');
 
         // Query submissions for this webform_id
+        // Composite index (webform_id, created_at) will be used for efficient sorting
         $query = ContactSubmission::with(['readsWithUsers'])
             ->where('webform_id', $webformId)
             ->when($search, function ($q, $search) {
@@ -416,17 +628,39 @@ class ContactController extends Controller
             'radius' => $radius,
         ]));
 
+        // Use composite index (webform_id, created_at) for efficient sorting
+        // This prevents "Out of sort memory" errors by using the index for sorting
         $submissions = $query->orderBy($sortColumn, $sortDirection)->paginate(15)->withQueryString();
 
         // Get total count for this webform
         $totalCount = ContactSubmission::where('webform_id', $webformId)->count();
 
+        // Detect available fields - PRIORITY: Form-level (show only THIS form's fields)
+        $formFields = $this->detectAvailableFields($webformId);
+        
+        // Get type and station fields for reference (used for preference inheritance, not for display)
+        $typeFields = $submissionForm ? $this->detectAvailableFields(null, $submissionForm, $station) : [];
+        $stationFields = $this->detectAvailableFields(null, null, $station);
+        
+        // Get new fields notification (fields detected since last visit)
+        $newFields = $this->getNewFields($webformId);
+        
+        // Get smart defaults: First 4 fields from THIS form's JSON data
+        // This ensures each form shows its most relevant fields by default
+        $smartDefaults = FormDefaultsHelper::getDefaultsForForm($webformId, $submissionForm, $station, 'list');
+
         return Inertia::render('Forms/Detail', [
             'webformId' => $webformId,
             'formName' => $formName,
             'station' => $station,
+            'submissionForm' => $submissionForm,
             'submissions' => $submissions,
             'totalCount' => $totalCount,
+            'availableFields' => $formFields, // Form-specific fields (primary)
+            'typeFields' => $typeFields, // For reference/inheritance
+            'stationFields' => $stationFields, // For reference/inheritance
+            'newFields' => array_column($newFields, 'key'), // New fields for notification
+            'smartDefaults' => $smartDefaults, // Smart defaults for this type
             'filters' => [
                 'search' => $search,
                 'status' => $status,
@@ -459,8 +693,30 @@ class ContactController extends Controller
         // Load with reads and users
         $submission->load(['readsWithUsers']);
 
+        // Detect available fields - Form-specific (from this submission's form)
+        $formFields = $this->detectAvailableFields($submission->webform_id);
+        $typeFields = $submission->submission_form ? $this->detectAvailableFields(null, $submission->submission_form, $submission->station) : [];
+        $stationFields = $submission->station ? $this->detectAvailableFields(null, null, $submission->station) : [];
+        
+        // Get new fields notification
+        $newFields = $submission->webform_id ? $this->getNewFields($submission->webform_id) : [];
+        $newFieldKeys = array_column($newFields, 'key');
+        
+        // Get smart defaults: First 4 fields from THIS form's JSON data
+        $smartDefaults = FormDefaultsHelper::getDefaultsForForm(
+            $submission->webform_id ?? '',
+            $submission->submission_form, 
+            $submission->station,
+            'detail'
+        );
+
         return Inertia::render('Contact/Show', [
-            'submission' => $submission
+            'submission' => $submission,
+            'availableFields' => $formFields, // Form-specific fields
+            'typeFields' => $typeFields,
+            'stationFields' => $stationFields,
+            'newFields' => $newFieldKeys, // New fields for notification
+            'smartDefaults' => $smartDefaults, // Smart defaults for this type
         ]);
     }
 

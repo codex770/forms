@@ -33,6 +33,8 @@ import {
 } from 'lucide-vue-next';
 import { ref, computed, onMounted } from 'vue';
 import { type BreadcrumbItem } from '@/types';
+import { useFieldPreferences } from '@/composables/useFieldPreferences';
+import { groupFieldsByCategory, formatFieldValue } from '@/utils/fieldDetection';
 
 interface ContactSubmission {
     id: number;
@@ -57,16 +59,28 @@ interface ContactSubmission {
     }>;
 }
 
+interface FieldInfo {
+    key: string;
+    type: string;
+    label: string;
+}
+
 interface Props {
     webformId: string;
     formName: string;
     station: string;
+    submissionForm?: string;
     submissions: {
         data?: ContactSubmission[];
         links?: any[];
         meta?: any;
     };
     totalCount: number;
+    availableFields?: FieldInfo[]; // Form-specific fields (primary)
+    typeFields?: FieldInfo[]; // For reference/inheritance
+    stationFields?: FieldInfo[]; // For reference/inheritance
+    newFields?: string[]; // New field keys for notification
+    smartDefaults?: string[]; // Smart defaults for this type
     filters: {
         search?: string;
         status?: string;
@@ -88,6 +102,9 @@ interface Props {
 }
 
 const props = defineProps<Props>();
+
+// New fields from backend
+const newFields = computed(() => props.newFields || []);
 
 const authUser = computed(() => usePage().props.auth.user);
 
@@ -121,20 +138,104 @@ const selectedRows = ref<Set<number>>(new Set());
 const editingRow = ref<number | null>(null);
 const editingData = ref<any>({});
 
-// Column visibility
-const visibleColumns = ref<Set<string>>(new Set(['checkbox', 'status', 'id', 'name', 'email', 'message', 'date', 'actions']));
+// Build category path for preferences
+// DEFAULT: Type level (station:type) - most efficient, applies to all forms of that type
+// OVERRIDE: Form level (station:type:webform_id) - for special cases
+const categoryPath = computed(() => {
+    // Default to TYPE level for preference storage (efficient)
+    if (props.submissionForm) {
+        return `${props.station}:${props.submissionForm}`; // TYPE level
+    }
+    return props.webformId; // Fallback to form level
+});
+
+// Form-level category (for reference, but preferences default to type level)
+const formCategoryPath = computed(() => {
+    if (props.submissionForm) {
+        return `${props.station}:${props.submissionForm}:${props.webformId}`;
+    }
+    return props.webformId;
+});
+
+// Field preferences composable - uses TYPE level by default
+// Pass smart defaults from backend for optimal first-time experience
+const {
+    visibleFields,
+    loadPreferences,
+    savePreferences,
+    getFieldValue,
+    getFieldLabel,
+    toggleField,
+    setAllFields,
+    loading: loadingPrefs,
+    saving: savingPrefs,
+    // Removed preferences (presets) - using single auto-saving preference
+} = useFieldPreferences('list', categoryPath.value, props.smartDefaults || []); // TYPE level category + smart defaults
+
+// Clear new fields notification
+const clearNewFields = async () => {
+    try {
+        await fetch(`/forms/${props.webformId}/clear-new-fields`, {
+            method: 'POST',
+            headers: {
+                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '',
+            },
+        });
+    } catch (error) {
+        console.error('Error clearing new fields:', error);
+    }
+};
+
+// Column visibility - combine system columns with user-selected fields
+const visibleColumns = computed(() => {
+    const cols = new Set<string>(['checkbox', 'status', 'id', 'actions']); // System columns always visible
+    visibleFields.value.forEach(field => cols.add(field));
+    return cols;
+});
+
 const showColumnSettings = ref(false);
 
 // Sorting
 const sortColumn = ref<string>(props.sortColumn || 'created_at');
 const sortDirection = ref<'asc' | 'desc'>((props.sortDirection as 'asc' | 'desc') || 'desc');
 
-// Presets
-const presets = ref<any[]>([]);
-const showPresetDialog = ref(false);
-const presetName = ref('');
-const savingPreset = ref(false);
-const loadingPreset = ref(false);
+// Removed preset system - using single preference only (auto-saves on checkbox change)
+
+// Available fields from backend - PRIMARY: Form-specific fields only
+// This ensures we only show fields that exist in THIS form, not union of all forms
+const allAvailableFields = computed(() => {
+    // PRIORITY: Use form-specific fields (availableFields) as primary source
+    // These are fields detected from THIS specific form only
+    if (props.availableFields && props.availableFields.length > 0) {
+        return props.availableFields;
+    }
+    
+    // FALLBACK: If no form-specific fields, use type-level (for new forms)
+    if (props.typeFields && props.typeFields.length > 0) {
+        return props.typeFields;
+    }
+    
+    // FALLBACK: Use station-level fields
+    return props.stationFields || [];
+});
+
+// Check if a field is new (recently detected)
+const isNewField = (fieldKey: string): boolean => {
+    return props.newFields?.includes(fieldKey) || false;
+};
+
+const groupedFields = computed(() => groupFieldsByCategory(allAvailableFields.value));
+
+// Computed property for visible fields (ensures reactivity)
+const visibleFieldList = computed(() => {
+    return allAvailableFields.value.filter(f => visibleFields.value.has(f.key));
+});
+
+// Computed property that returns the Set directly for template use
+// This ensures Vue tracks changes and auto-unwraps properly
+const visibleFieldsSet = computed(() => {
+    return visibleFields.value || new Set<string>();
+});
 
 // Check if current user has read the submission
 const isReadByCurrentUser = (submission: ContactSubmission): boolean => {
@@ -337,191 +438,110 @@ const deleteSubmission = (submission: ContactSubmission) => {
     }
 };
 
-// Column visibility toggle
-const toggleColumn = (column: string) => {
-    if (visibleColumns.value.has(column)) {
-        visibleColumns.value.delete(column);
-    } else {
-        visibleColumns.value.add(column);
-    }
-    saveColumnPreferences();
-};
-
-// Save column preferences
-const saveColumnPreferences = async () => {
-    try {
-        await fetch('/api/preferences', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || ''
-            },
-            body: JSON.stringify({
-                category: props.webformId,
-                preference_name: 'column-visibility',
-                visible_columns: Array.from(visibleColumns.value),
-                is_default: false
-            })
-        });
-    } catch (error) {
-        console.error('Error saving column preferences:', error);
-    }
-};
-
-// Load preferences
-const loadPreferences = async () => {
-    try {
-        const response = await fetch(`/api/preferences?category=${props.webformId}`);
-        const data = await response.json();
-        
-        if (data.success) {
-            presets.value = data.preferences || [];
-            
-            // Load default preference or column visibility preference
-            const defaultPref = data.preferences.find((p: any) => p.is_default) 
-                || data.preferences.find((p: any) => p.preference_name === 'column-visibility');
-            
-            if (defaultPref) {
-                if (defaultPref.visible_columns) {
-                    visibleColumns.value = new Set(defaultPref.visible_columns);
-                }
-                if (defaultPref.sort_config) {
-                    sortColumn.value = defaultPref.sort_config.column || 'created_at';
-                    sortDirection.value = defaultPref.sort_config.direction || 'desc';
-                }
-            }
-        }
-    } catch (error) {
-        console.error('Error loading preferences:', error);
-    }
-};
-
-// Save preset
-const savePreset = async () => {
-    if (!presetName.value.trim()) {
-        alert('Please enter a preset name');
+// Handle checkbox change - toggle approach (simpler, matches Contact/Show.vue pattern)
+const handleFieldCheckboxChange = async (fieldKey: string) => {
+    console.log('=== CHECKBOX CLICKED ===');
+    console.log('Field:', fieldKey);
+    console.log('visibleFields ref:', visibleFields);
+    if (!visibleFields || !visibleFields.value) {
+        console.error('❌ visibleFields is not initialized!');
         return;
     }
+    console.log('Current state before:', visibleFields.value.has(fieldKey));
     
-    savingPreset.value = true;
     try {
-        const response = await fetch('/api/preferences', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || ''
-            },
-            body: JSON.stringify({
-                category: props.webformId, // Store webform_id in category field
-                preference_name: presetName.value,
-                visible_columns: Array.from(visibleColumns.value),
-                sort_config: {
-                    column: sortColumn.value,
-                    direction: sortDirection.value
-                },
-                saved_filters: {
-                    search: searchQuery.value,
-                    status: selectedStatus.value,
-                    date_from: dateFrom.value,
-                    date_to: dateTo.value,
-                    age_min: ageMin.value,
-                    age_max: ageMax.value,
-                    birth_year_min: birthYearMin.value,
-                    birth_year_max: birthYearMax.value,
-                    zip_code: zipCode.value,
-                    city: city.value,
-                    gender: gender.value,
-                    radius: radius.value,
-                    radius_lat: radiusLat.value,
-                    radius_lng: radiusLng.value,
-                },
-                is_default: false
-            })
-        });
+        // Toggle the field
+        const newSet = new Set(visibleFields.value);
+        if (newSet.has(fieldKey)) {
+            newSet.delete(fieldKey);
+            console.log('Removed field:', fieldKey);
+        } else {
+            newSet.add(fieldKey);
+            console.log('Added field:', fieldKey);
+        }
+        visibleFields.value = newSet;
         
-        const data = await response.json();
-        if (data.success) {
-            presetName.value = '';
-            showPresetDialog.value = false;
-            await loadPreferences();
-            alert('Preset saved successfully!');
+        console.log('Current state after:', visibleFields.value.has(fieldKey));
+        console.log('All visible fields:', Array.from(visibleFields.value));
+        console.log('visibleFields.size:', visibleFields.value.size);
+        
+        // Auto-save
+        console.log('Calling saveColumnPreferences...');
+        const saveResult = await saveColumnPreferences();
+        console.log('Save result:', saveResult);
+        
+        if (saveResult) {
+            console.log('✅ Preferences saved successfully');
+        } else {
+            console.error('❌ Failed to save preferences');
         }
     } catch (error) {
-        console.error('Error saving preset:', error);
-        alert('Error saving preset');
-    } finally {
-        savingPreset.value = false;
+        console.error('ERROR in handleFieldCheckboxChange:', error);
+        console.error('Error stack:', (error as Error).stack);
+        alert('Error: ' + (error as Error).message);
     }
 };
 
-// Load preset
-const loadPreset = async (preference: any) => {
-    loadingPreset.value = true;
+// Removed setFieldVisibility - using handleFieldCheckboxChange directly
+
+// Save column preferences - saves as single default preference (auto-save on change)
+const saveColumnPreferences = async (): Promise<boolean> => {
+    console.log('=== saveColumnPreferences called ===');
+    
+    // Ensure we have the latest value (handle both ref and unwrapped cases)
+    const currentFields = visibleFields.value || visibleFields;
+    if (!currentFields) {
+        console.error('❌ visibleFields is undefined in saveColumnPreferences!');
+        return false;
+    }
+    
+    // Get ONLY the fields that are currently checked (in visibleFields)
+    const checkedFields = Array.from(currentFields);
+    console.log('✅ Current visibleFields state:', checkedFields);
+    console.log('✅ visibleFields.size:', currentFields.size);
+    console.log('✅ visibleFields type:', currentFields instanceof Set ? 'Set' : typeof currentFields);
+    
+    // Only save fields that exist in availableFields (prevent saving non-existent fields)
+    const validFields = checkedFields.filter(fieldKey => 
+        allAvailableFields.value.some(f => f.key === fieldKey)
+    );
+    
+    console.log('Valid fields to save:', validFields);
+    console.log('All available fields:', allAvailableFields.value.map(f => f.key));
+    
+    if (validFields.length === 0) {
+        console.warn('⚠️ No valid fields to save - skipping');
+        return false;
+    }
+    
+    console.log('Calling savePreferences with:', {
+        fields: validFields,
+        preferenceName: 'list-view-columns',
+        asDefault: true,
+        category: categoryPath.value
+    });
+    
+    // Save as single default preference (is_default: true)
+    // This replaces any existing preference for this category
     try {
-        // 1. Update visible columns
-        if (preference.visible_columns) {
-            visibleColumns.value = new Set(preference.visible_columns);
-        }
-        
-        // 2. Update sorting
-        if (preference.sort_config) {
-            sortColumn.value = preference.sort_config.column || 'created_at';
-            sortDirection.value = preference.sort_config.direction || 'desc';
-        }
-        
-        // 3. Update filters
-        if (preference.saved_filters) {
-            const filters = preference.saved_filters;
-            searchQuery.value = filters.search || '';
-            selectedStatus.value = filters.status || 'all';
-            dateFrom.value = filters.date_from || '';
-            dateTo.value = filters.date_to || '';
-            ageMin.value = filters.age_min || '';
-            ageMax.value = filters.age_max || '';
-            birthYearMin.value = filters.birth_year_min || '';
-            birthYearMax.value = filters.birth_year_max || '';
-            zipCode.value = filters.zip_code || '';
-            city.value = filters.city || '';
-            gender.value = filters.gender || '';
-            radius.value = filters.radius || '';
-            radiusLat.value = filters.radius_lat || '';
-            radiusLng.value = filters.radius_lng || '';
-        }
-        
-        // 4. Apply filters by navigating with updated query params
-        // This will reload the page with the new filters and sorting
-        await applyFilters();
-        
-        // Show success message
-        console.log('Preset loaded successfully:', preference.preference_name);
+        const result = await savePreferences(validFields, {
+            preferenceName: 'list-view-columns', // Default preference name
+            asDefault: true, // Always save as default (single preference per category)
+        });
+        console.log('savePreferences returned:', result);
+        return result;
     } catch (error) {
-        console.error('Error loading preset:', error);
-        alert('Error loading preset. Please try again.');
-    } finally {
-        loadingPreset.value = false;
+        console.error('❌ Error in savePreferences:', error);
+        throw error;
     }
 };
 
-// Delete preset
-const deletePreset = async (preferenceId: number) => {
-    if (!confirm('Are you sure you want to delete this preset?')) return;
-    
-    try {
-        const response = await fetch(`/api/preferences/${preferenceId}`, {
-            method: 'DELETE',
-            headers: {
-                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || ''
-            }
-        });
-        
-        const data = await response.json();
-        if (data.success) {
+// Load preferences (wrapper to use composable)
+const loadPreferencesWrapper = async () => {
             await loadPreferences();
-        }
-    } catch (error) {
-        console.error('Error deleting preset:', error);
-    }
 };
+
+// Removed preset functions - using single auto-saving preference
 
 // Toggle sort
 const toggleSort = (column: string) => {
@@ -534,25 +554,49 @@ const toggleSort = (column: string) => {
     // TODO: Apply sorting to table
 };
 
-// Handle preset button click
-const handlePresetButtonClick = () => {
-    if (presets.value.length === 0) {
-        // No presets, show save dialog
-        presetName.value = '';
-        showPresetDialog.value = true;
-    } else {
-        // Has presets, toggle list
-        showPresetDialog.value = !showPresetDialog.value;
-    }
-};
+// Removed preset button handler - using single auto-saving preference
 
-onMounted(() => {
+onMounted(async () => {
+    // Test: Verify visibleFields is initialized
+    console.log('=== MOUNTED ===');
+    console.log('visibleFields ref:', visibleFields);
+    console.log('visibleFields.value:', visibleFields?.value);
+    
     // Auto-apply filters on mount if they exist
     if (searchQuery.value || selectedStatus.value !== 'all') {
         applyFilters();
     }
+    
     // Load user preferences
-    loadPreferences();
+    await loadPreferencesWrapper();
+    
+    // Test: Verify functions are accessible
+    console.log('handleFieldCheckboxChange function:', typeof handleFieldCheckboxChange);
+    console.log('saveColumnPreferences function:', typeof saveColumnPreferences);
+    console.log('visibleFields after load:', visibleFields?.value ? Array.from(visibleFields.value) : 'undefined');
+    console.log('visibleFields.size after load:', visibleFields?.value?.size || 0);
+    console.log('visibleFieldsSet computed:', Array.from(visibleFieldsSet.value));
+    console.log('visibleFieldsSet.size:', visibleFieldsSet.value.size);
+    console.log('allAvailableFields:', allAvailableFields.value);
+    
+    // Verify checkbox state for a few fields
+    if (visibleFieldsSet.value.size > 0 && allAvailableFields.value.length > 0) {
+        const testFields = ['email', 'fname', 'lname', 'sid', 'zip'];
+        testFields.forEach(fieldKey => {
+            const isVisible = visibleFieldsSet.value.has(fieldKey);
+            console.log(`Field "${fieldKey}": visibleFieldsSet.has()=${isVisible}`);
+        });
+    }
+    
+    // If no preferences loaded, use smart defaults
+    if (visibleFields && visibleFields.value && visibleFields.value.size === 0 && allAvailableFields.value.length > 0) {
+        console.log('No preferences found, using smart defaults');
+        const defaults = props.smartDefaults || allAvailableFields.value.slice(0, 4).map(f => f.key);
+        if (visibleFields.value) {
+            visibleFields.value = new Set(defaults);
+            console.log('Set defaults:', Array.from(visibleFields.value));
+        }
+    }
 });
 </script>
 
@@ -584,161 +628,117 @@ onMounted(() => {
                     </div>
                 </div>
                 <div class="flex items-center gap-2">
-                    <!-- TODO: View Settings Button - Temporarily Hidden (not working properly yet) -->
-                    <!-- 
+                    <!-- View Settings Button -->
                     <div class="relative">
                         <Button variant="outline" size="sm" @click="showColumnSettings = !showColumnSettings">
                             <Settings class="mr-2 h-4 w-4" />
                             View Settings
-                            <Badge v-if="presets.length > 0" variant="secondary" class="ml-2">
-                                {{ presets.length }}
-                            </Badge>
                         </Button>
                         
-                        <div v-if="showColumnSettings" class="absolute right-0 mt-2 w-80 bg-white dark:bg-gray-800 border rounded-lg shadow-xl z-50">
-                            <div v-if="presets.length > 0" class="border-b p-3">
-                                <div class="text-sm font-semibold mb-2 flex items-center gap-2">
-                                    <BookmarkCheck class="h-4 w-4" />
-                                    Saved Views
+                        <div v-if="showColumnSettings" class="absolute right-0 mt-2 w-96 bg-white dark:bg-gray-800 border rounded-lg shadow-xl z-50 max-h-[600px] overflow-y-auto">
+
+                            <!-- Column Selection -->
+                            <div class="p-3 border-b">
+                                <div class="text-sm font-semibold mb-2 flex items-center justify-between">
+                                    <div class="flex items-center gap-2">
+                                        <Columns class="h-4 w-4" />
+                                        Show/Hide Columns
+                                        <Badge v-if="newFields && newFields.length > 0" variant="secondary" class="ml-2 text-xs">
+                                            {{ newFields.length }} new
+                                        </Badge>
                                 </div>
-                                <div class="max-h-40 overflow-y-auto space-y-1">
-                                    <div 
-                                        v-for="preset in presets" 
-                                        :key="preset.id"
-                                        class="flex items-center justify-between p-2 hover:bg-muted rounded cursor-pointer group"
-                                    >
-                                        <div class="flex-1 min-w-0" @click="loadPreset(preset); showColumnSettings = false">
-                                            <div class="text-sm font-medium truncate">{{ preset.preference_name }}</div>
-                                            <div class="text-xs text-muted-foreground">Click to load this view</div>
-                                        </div>
-                                        <Button 
-                                            variant="ghost" 
-                                            size="sm"
-                                            @click.stop="deletePreset(preset.id)"
-                                            class="h-7 w-7 p-0 text-red-600 opacity-0 group-hover:opacity-100 transition-opacity"
-                                        >
-                                            <Trash2 class="h-3.5 w-3.5" />
+                                    <div class="flex gap-1">
+                                        <Button variant="ghost" size="sm" @click="async () => { 
+                                            console.log('All button clicked');
+                                            setAllFields(allAvailableFields.map(f => f.key), true); 
+                                            await saveColumnPreferences(); 
+                                        }" class="h-6 text-xs">
+                                            All
+                                        </Button>
+                                        <Button variant="ghost" size="sm" @click="async () => { 
+                                            console.log('None button clicked');
+                                            setAllFields(allAvailableFields.map(f => f.key), false); 
+                                            await saveColumnPreferences(); 
+                                        }" class="h-6 text-xs">
+                                            None
                                         </Button>
                                     </div>
                                 </div>
+                                <div v-if="newFields && newFields.length > 0" class="mb-3 p-2 bg-blue-50 dark:bg-blue-950 rounded text-xs">
+                                    <div class="flex items-center justify-between">
+                                        <span class="text-blue-700 dark:text-blue-300">
+                                            New fields detected! Check them below.
+                                        </span>
+                                        <Button variant="ghost" size="sm" @click="clearNewFields" class="h-5 text-xs">
+                                            Dismiss
+                                        </Button>
                             </div>
-
-                            <div class="p-3 border-b">
-                                <div class="text-sm font-semibold mb-2 flex items-center gap-2">
-                                    <Columns class="h-4 w-4" />
-                                    Show/Hide Columns
                                 </div>
-                                <div class="grid grid-cols-2 gap-2">
-                                <label class="flex items-center gap-2 p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded cursor-pointer">
+                                <div class="space-y-3 max-h-60 overflow-y-auto" :key="`fields-${Array.from(visibleFieldsSet).join('-')}`">
+                                    <div v-for="(fields, category) in groupedFields" :key="category" class="space-y-1">
+                                        <div class="text-xs font-medium text-muted-foreground uppercase">{{ category }}</div>
+                                        <div class="space-y-1 pl-2">
+                                            <label 
+                                                v-for="field in fields" 
+                                                :key="`${field.key}-${visibleFieldsSet.has(field.key) ? 'checked' : 'unchecked'}`"
+                                                class="flex items-center gap-2 p-1 hover:bg-muted rounded cursor-pointer"
+                                            >
                                     <Checkbox 
-                                        :checked="visibleColumns.has('checkbox')"
-                                        @update:checked="() => toggleColumn('checkbox')"
-                                    />
-                                    <span class="text-sm">Checkbox</span>
-                                </label>
-                                <label class="flex items-center gap-2 p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded cursor-pointer">
-                                    <Checkbox 
-                                        :checked="visibleColumns.has('status')"
-                                        @update:checked="() => toggleColumn('status')"
-                                    />
-                                    <span class="text-sm">Status</span>
-                                </label>
-                                <label class="flex items-center gap-2 p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded cursor-pointer">
-                                    <Checkbox 
-                                        :checked="visibleColumns.has('id')"
-                                        @update:checked="() => toggleColumn('id')"
-                                    />
-                                    <span class="text-sm">ID</span>
-                                </label>
-                                <label class="flex items-center gap-2 p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded cursor-pointer">
-                                    <Checkbox 
-                                        :checked="visibleColumns.has('name')"
-                                        @update:checked="() => toggleColumn('name')"
-                                    />
-                                    <span class="text-sm">Name</span>
-                                </label>
-                                <label class="flex items-center gap-2 p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded cursor-pointer">
-                                    <Checkbox 
-                                        :checked="visibleColumns.has('email')"
-                                        @update:checked="() => toggleColumn('email')"
-                                    />
-                                    <span class="text-sm">Email</span>
-                                </label>
-                                <label class="flex items-center gap-2 p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded cursor-pointer">
-                                    <Checkbox 
-                                        :checked="visibleColumns.has('message')"
-                                        @update:checked="() => toggleColumn('message')"
-                                    />
-                                    <span class="text-sm">Message</span>
-                                </label>
-                                <label class="flex items-center gap-2 p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded cursor-pointer">
-                                    <Checkbox 
-                                        :checked="visibleColumns.has('date')"
-                                        @update:checked="() => toggleColumn('date')"
-                                    />
-                                    <span class="text-sm">Date</span>
-                                </label>
-                                <label class="flex items-center gap-2 p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded cursor-pointer">
-                                    <Checkbox 
-                                        :checked="visibleColumns.has('actions')"
-                                        @update:checked="() => toggleColumn('actions')"
-                                    />
-                                    <span class="text-sm">Actions</span>
+                                                    :checked="visibleFieldsSet.has(field.key)"
+                                                    @click="(e) => {
+                                                        e.preventDefault();
+                                                        e.stopPropagation();
+                                                        console.log('=== CHECKBOX CLICK EVENT ===');
+                                                        console.log('Field key:', field.key);
+                                                        console.log('visibleFields ref:', visibleFields);
+                                                        if (!visibleFields) {
+                                                            console.error('❌ visibleFields ref is undefined!');
+                                                            return;
+                                                        }
+                                                        // In template, Vue auto-unwraps refs, so visibleFields is already the Set
+                                                        // But in event handlers, we need to check if it's a ref
+                                                        const fieldsSet = visibleFields.value || visibleFields;
+                                                        if (!fieldsSet) {
+                                                            console.error('❌ visibleFields.value is undefined!');
+                                                            return;
+                                                        }
+                                                        console.log('Current checked state:', fieldsSet.has(field.key));
+                                                        console.log('Calling handleFieldCheckboxChange...');
+                                                        handleFieldCheckboxChange(field.key).catch(err => {
+                                                            console.error('Error in handleFieldCheckboxChange:', err);
+                                                        });
+                                                    }"
+                                                />
+                                                <span class="text-sm">{{ field.label }}</span>
+                                                <Badge 
+                                                    v-if="isNewField(field.key)" 
+                                                    variant="secondary" 
+                                                    class="ml-auto text-xs bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300"
+                                                >
+                                                    New
+                                                </Badge>
                                 </label>
                             </div>
                         </div>
-
-                        <div class="p-3 bg-muted/30">
-                            <Button 
-                                variant="default" 
-                                size="sm" 
-                                class="w-full"
-                                @click="showPresetDialog = true; showColumnSettings = false"
-                            >
-                                <Bookmark class="mr-2 h-4 w-4" />
-                                Save Current View As...
-                            </Button>
-                            <p class="text-xs text-muted-foreground mt-2 text-center">
-                                Save your column selection and filters for quick access later
-                            </p>
                         </div>
+                                <div class="mt-2 text-xs text-muted-foreground">
+                                    <div class="flex items-center gap-2 mb-1">
+                                        <span v-if="savingPrefs" class="text-blue-600 animate-pulse">Saving...</span>
+                                        <span v-else-if="visibleFields.size > 0" class="text-green-600">✓ Auto-saved</span>
                     </div>
-                    -->
+                                    <div>
+                                        Saving at: <strong>Type level</strong> (applies to all {{ submissionForm || 'forms' }} forms)
+                </div>
+            </div>
+                            </div>
+                            </div>
+                        </div>
                     
                     <Badge variant="secondary" class="h-8 px-3">{{ station }}</Badge>
                 </div>
             </div>
 
-            <!-- Save Preset Dialog -->
-            <div v-if="showPresetDialog && (presets.length === 0 || presetName !== '')" class="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[100]" @click.self="showPresetDialog = false; presetName = ''">
-                <Card class="w-96" @click.stop>
-                    <CardHeader>
-                        <CardTitle>Save Preset</CardTitle>
-                        <CardDescription>Save your current view settings as a preset</CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                        <div class="space-y-4">
-                            <div>
-                                <label class="text-sm font-medium">Preset Name</label>
-                                <Input
-                                    v-model="presetName"
-                                    placeholder="e.g., My Custom View"
-                                    @keyup.enter="savePreset"
-                                />
-                            </div>
-                            <div class="flex gap-2 justify-end">
-                                <Button variant="outline" @click="showPresetDialog = false; presetName = ''">
-                                    Cancel
-                                </Button>
-                                <Button @click="savePreset" :disabled="savingPreset || !presetName.trim()">
-                                    <Save class="mr-2 h-4 w-4" />
-                                    {{ savingPreset ? 'Saving...' : 'Save Preset' }}
-                                </Button>
-                            </div>
-                        </div>
-                    </CardContent>
-                </Card>
-            </div>
+            <!-- Removed preset dialog - using single auto-saving preference -->
 
             <!-- Filters -->
             <Card>
@@ -967,9 +967,14 @@ onMounted(() => {
                                 </TableHead>
                                 <TableHead v-if="visibleColumns.has('status')" class="w-12">Status</TableHead>
                                 <TableHead v-if="visibleColumns.has('id')" class="w-16">ID</TableHead>
-                                <TableHead v-if="visibleColumns.has('name')">Name</TableHead>
-                                <TableHead v-if="visibleColumns.has('email')">Email</TableHead>
-                                <TableHead v-if="visibleColumns.has('message')" class="hidden md:table-cell">Message Preview</TableHead>
+                                <!-- Dynamic field columns -->
+                                <TableHead 
+                                    v-for="field in visibleFieldList" 
+                                    :key="`header-${field.key}`"
+                                    :class="field.type === 'object' ? 'hidden lg:table-cell' : ''"
+                                >
+                                    {{ field.label }}
+                                </TableHead>
                                 <TableHead v-if="visibleColumns.has('date')" class="w-32">Date</TableHead>
                                 <TableHead v-if="visibleColumns.has('actions')" class="w-48 text-right">Actions</TableHead>
                             </TableRow>
@@ -988,7 +993,10 @@ onMounted(() => {
                                 <TableCell v-if="visibleColumns.has('checkbox')">
                                     <Checkbox 
                                         :checked="selectedRows.has(submission.id)"
-                                        @update:checked="() => toggleRowSelection(submission.id)"
+                                        @update:checked="() => {
+                                            console.log('Row checkbox clicked:', submission.id);
+                                            toggleRowSelection(submission.id);
+                                        }"
                                     />
                                 </TableCell>
 
@@ -1013,46 +1021,30 @@ onMounted(() => {
                                     #{{ submission.id }}
                                 </TableCell>
 
-                                <!-- Name -->
-                                <TableCell v-if="visibleColumns.has('name')">
+                                <!-- Dynamic field columns -->
+                                <TableCell 
+                                    v-for="field in visibleFieldList" 
+                                    :key="`cell-${submission.id}-${field.key}`"
+                                    :class="field.type === 'object' ? 'hidden lg:table-cell' : ''"
+                                >
                                     <div v-if="editingRow === submission.id" class="flex items-center gap-2">
                                         <Input 
-                                            v-model="editingData.name"
+                                            v-model="editingData[field.key]"
                                             class="h-8"
-                                            placeholder="Name"
+                                            :placeholder="field.label"
                                         />
                                     </div>
-                                    <div v-else class="font-medium text-gray-900">
-                                        {{ getDisplayName(submission.data) }}
+                                    <div v-else class="text-sm">
+                                        <span v-if="field.type === 'object'" class="font-mono text-xs">
+                                            {{ formatFieldValue(getFieldValue(submission.data, field.key), field.type) }}
+                                        </span>
+                                        <span v-else-if="field.type === 'date'" class="text-gray-700">
+                                            {{ formatFieldValue(getFieldValue(submission.data, field.key), field.type) }}
+                                        </span>
+                                        <span v-else class="text-gray-700 truncate max-w-xs">
+                                            {{ formatFieldValue(getFieldValue(submission.data, field.key), field.type) }}
+                                        </span>
                                     </div>
-                                </TableCell>
-
-                                <!-- Email -->
-                                <TableCell v-if="visibleColumns.has('email')">
-                                    <div v-if="editingRow === submission.id" class="flex items-center gap-2">
-                                        <Input 
-                                            v-model="editingData.email"
-                                            class="h-8"
-                                            placeholder="Email"
-                                        />
-                                    </div>
-                                    <div v-else class="text-sm text-gray-500 truncate max-w-xs">
-                                        {{ getDisplayEmail(submission.data) }}
-                                    </div>
-                                </TableCell>
-
-                                <!-- Message Preview -->
-                                <TableCell v-if="visibleColumns.has('message')" class="hidden md:table-cell">
-                                    <div v-if="editingRow === submission.id" class="flex items-center gap-2">
-                                        <Input 
-                                            v-model="editingData.description"
-                                            class="h-8"
-                                            placeholder="Description"
-                                        />
-                                    </div>
-                                    <p v-else class="text-sm text-gray-700 max-w-xs truncate">
-                                        {{ getMessageText(submission.data) }}
-                                    </p>
                                 </TableCell>
 
                                 <!-- Date -->

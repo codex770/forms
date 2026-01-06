@@ -56,9 +56,16 @@ Route::middleware(['auth', 'verified'])->group(function () {
     // Form detail view - shows submissions for a specific webform_id
     Route::get('forms/{webformId}', [App\Http\Controllers\ContactController::class, 'showFormDetail'])->name('forms.detail');
     
+    // Clear new fields notification
+    Route::post('forms/{webformId}/clear-new-fields', function (string $webformId) {
+        app(App\Http\Controllers\ContactController::class)->clearNewFields($webformId);
+        return response()->json(['success' => true]);
+    })->name('forms.clear-new-fields');
+    
     // User table preferences API
     Route::prefix('api/preferences')->group(function () {
         Route::get('/', [App\Http\Controllers\UserTablePreferenceController::class, 'index'])->name('preferences.index');
+        Route::get('/inherited', [App\Http\Controllers\UserTablePreferenceController::class, 'getInheritedPreferences'])->name('preferences.inherited');
         Route::post('/', [App\Http\Controllers\UserTablePreferenceController::class, 'store'])->name('preferences.store');
         Route::get('{preference}', [App\Http\Controllers\UserTablePreferenceController::class, 'show'])->name('preferences.show');
         Route::put('{preference}', [App\Http\Controllers\UserTablePreferenceController::class, 'update'])->name('preferences.update');
