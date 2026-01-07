@@ -78,7 +78,7 @@ class ContactController extends Controller
             // Get all request data (accepts any JSON structure)
             // Try to get JSON body first, fallback to all request data
             $data = $request->json()->all();
-            
+
             // If JSON body is empty, try getting all request data (fallback for form-data)
             if (empty($data)) {
                 $data = $request->all();
@@ -109,13 +109,12 @@ class ContactController extends Controller
                 'message' => 'Contact form submitted successfully',
                 'submission_id' => $submission->id
             ], 201);
-
         } catch (\Exception $e) {
             \Log::error('Form submission error: ' . $e->getMessage(), [
                 'category' => $category,
                 'trace' => $e->getTraceAsString()
             ]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'An error occurred while processing your submission',
@@ -139,24 +138,24 @@ class ContactController extends Controller
                 $q->where(function ($query) use ($search) {
                     // Search in name fields (multiple variations)
                     $query->whereJsonContains('data->name', $search)
-                          ->orWhereJsonContains('data->fname', $search)
-                          ->orWhereJsonContains('data->lname', $search)
-                          ->orWhereJsonContains('data->first_name', $search)
-                          ->orWhereJsonContains('data->last_name', $search)
-                          ->orWhereJsonContains('data->full_name', $search)
-                          // Search in email
-                          ->orWhereJsonContains('data->email', $search)
-                          // Search in message fields
-                          ->orWhereJsonContains('data->description', $search)
-                          ->orWhereJsonContains('data->message', $search)
-                          ->orWhereJsonContains('data->message_long', $search)
-                          ->orWhereJsonContains('data->message_short', $search)
-                          // Search in other common fields
-                          ->orWhereJsonContains('data->phone', $search)
-                          ->orWhereJsonContains('data->city', $search)
-                          ->orWhereJsonContains('data->zip', $search)
-                          // Also search the entire JSON data column as text for broader search
-                          ->orWhereRaw('CAST(data AS CHAR) LIKE ?', ["%{$search}%"]);
+                        ->orWhereJsonContains('data->fname', $search)
+                        ->orWhereJsonContains('data->lname', $search)
+                        ->orWhereJsonContains('data->first_name', $search)
+                        ->orWhereJsonContains('data->last_name', $search)
+                        ->orWhereJsonContains('data->full_name', $search)
+                        // Search in email
+                        ->orWhereJsonContains('data->email', $search)
+                        // Search in message fields
+                        ->orWhereJsonContains('data->description', $search)
+                        ->orWhereJsonContains('data->message', $search)
+                        ->orWhereJsonContains('data->message_long', $search)
+                        ->orWhereJsonContains('data->message_short', $search)
+                        // Search in other common fields
+                        ->orWhereJsonContains('data->phone', $search)
+                        ->orWhereJsonContains('data->city', $search)
+                        ->orWhereJsonContains('data->zip', $search)
+                        // Also search the entire JSON data column as text for broader search
+                        ->orWhereRaw('CAST(data AS CHAR) LIKE ?', ["%{$search}%"]);
                 });
             })
             ->when($category, function ($q, $category) {
@@ -198,20 +197,20 @@ class ContactController extends Controller
     private function detectAvailableFields(?string $webformId = null, ?string $submissionForm = null, ?string $station = null): array
     {
         $query = ContactSubmission::query();
-        
+
         // PRIORITY 1: Form-level detection (show only THIS form's fields)
         if ($webformId) {
             $query->where('webform_id', $webformId);
             // Get sample submissions from THIS form only (up to 100)
             $submissions = $query->limit(100)->get();
-        } 
+        }
         // PRIORITY 2: Type-level detection (fallback if form doesn't exist yet)
         elseif ($submissionForm && $station) {
             $query->where('submission_form', $submissionForm)
-                  ->where('station', $station);
+                ->where('station', $station);
             // Get sample submissions from all forms of this type (up to 100)
             $submissions = $query->limit(100)->get();
-        } 
+        }
         // PRIORITY 3: Station-level detection (fallback)
         elseif ($station) {
             $query->where('station', $station);
@@ -219,23 +218,23 @@ class ContactController extends Controller
         } else {
             return [];
         }
-        
+
         $fields = [];
         $fieldTypes = [];
-        
+
         foreach ($submissions as $submission) {
             $data = $submission->data ?? [];
-            
+
             if (is_array($data)) {
                 foreach ($data as $key => $value) {
                     // Skip system fields that are stored separately
                     if (in_array($key, ['webform_id', 'submission_form', 'station', 'category'])) {
                         continue;
                     }
-                    
+
                     if (!isset($fields[$key])) {
                         $fields[$key] = true;
-                        
+
                         // Detect field type
                         if (is_string($value)) {
                             // Check if it's a date
@@ -259,7 +258,7 @@ class ContactController extends Controller
                 }
             }
         }
-        
+
         // Convert to array with metadata and remove duplicates by key
         $result = [];
         $seenKeys = [];
@@ -269,22 +268,22 @@ class ContactController extends Controller
                 continue;
             }
             $seenKeys[] = $field;
-            
+
             $result[] = [
                 'key' => $field,
                 'type' => $fieldTypes[$field] ?? 'string',
                 'label' => $this->getFieldLabel($field),
             ];
         }
-        
+
         // Sort by label for better UX
         usort($result, function ($a, $b) {
             return strcmp($a['label'], $b['label']);
         });
-        
+
         return $result;
     }
-    
+
     /**
      * Detect new fields in a submission and cache them for notification.
      * This helps track when new fields are added to existing forms.
@@ -294,7 +293,7 @@ class ContactController extends Controller
         // Get existing fields for this form
         $existingFields = $this->detectAvailableFields($webformId);
         $existingKeys = array_column($existingFields, 'key');
-        
+
         // Find new fields (fields in newData but not in existingFields)
         $newFields = [];
         foreach (array_keys($newData) as $key) {
@@ -302,13 +301,13 @@ class ContactController extends Controller
             if (in_array($key, ['webform_id', 'submission_form', 'station', 'category'])) {
                 continue;
             }
-            
+
             // If field doesn't exist in existing fields, it's new
             if (!in_array($key, $existingKeys)) {
                 $newFields[] = $key;
             }
         }
-        
+
         // If new fields found, cache them for frontend notification
         // We'll use cache with a key that includes webform_id and user_id
         // This allows per-user notifications
@@ -328,21 +327,21 @@ class ContactController extends Controller
     {
         $cacheKey = "new_fields:{$webformId}";
         $newFieldKeys = \Cache::get($cacheKey, []);
-        
+
         if (empty($newFieldKeys)) {
             return [];
         }
-        
+
         // Get field metadata for new fields
         $allFields = $this->detectAvailableFields($webformId);
         $newFields = [];
-        
+
         foreach ($allFields as $field) {
             if (in_array($field['key'], $newFieldKeys)) {
                 $newFields[] = $field;
             }
         }
-        
+
         return $newFields;
     }
 
@@ -384,11 +383,11 @@ class ContactController extends Controller
             'birthday' => 'Birthday',
             'bday' => 'Birthday',
         ];
-        
+
         if (isset($labels[$key])) {
             return $labels[$key];
         }
-        
+
         // Convert snake_case or camelCase to Title Case
         return ucwords(str_replace(['_', '-'], ' ', $key));
     }
@@ -437,24 +436,24 @@ class ContactController extends Controller
                 $q->where(function ($query) use ($search) {
                     // Search in name fields (multiple variations) - use JSON_UNQUOTE to remove quotes
                     $query->whereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.name")) LIKE ?', ["%{$search}%"])
-                          ->orWhereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.fname")) LIKE ?', ["%{$search}%"])
-                          ->orWhereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.lname")) LIKE ?', ["%{$search}%"])
-                          ->orWhereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.first_name")) LIKE ?', ["%{$search}%"])
-                          ->orWhereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.last_name")) LIKE ?', ["%{$search}%"])
-                          ->orWhereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.full_name")) LIKE ?', ["%{$search}%"])
-                          // Search in email
-                          ->orWhereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.email")) LIKE ?', ["%{$search}%"])
-                          // Search in message fields
-                          ->orWhereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.description")) LIKE ?', ["%{$search}%"])
-                          ->orWhereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.message")) LIKE ?', ["%{$search}%"])
-                          ->orWhereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.message_long")) LIKE ?', ["%{$search}%"])
-                          ->orWhereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.message_short")) LIKE ?', ["%{$search}%"])
-                          // Search in other common fields
-                          ->orWhereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.phone")) LIKE ?', ["%{$search}%"])
-                          ->orWhereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.city")) LIKE ?', ["%{$search}%"])
-                          ->orWhereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.zip")) LIKE ?', ["%{$search}%"])
-                          // Fallback: search entire JSON
-                          ->orWhereRaw('CAST(data AS CHAR) LIKE ?', ["%{$search}%"]);
+                        ->orWhereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.fname")) LIKE ?', ["%{$search}%"])
+                        ->orWhereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.lname")) LIKE ?', ["%{$search}%"])
+                        ->orWhereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.first_name")) LIKE ?', ["%{$search}%"])
+                        ->orWhereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.last_name")) LIKE ?', ["%{$search}%"])
+                        ->orWhereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.full_name")) LIKE ?', ["%{$search}%"])
+                        // Search in email
+                        ->orWhereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.email")) LIKE ?', ["%{$search}%"])
+                        // Search in message fields
+                        ->orWhereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.description")) LIKE ?', ["%{$search}%"])
+                        ->orWhereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.message")) LIKE ?', ["%{$search}%"])
+                        ->orWhereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.message_long")) LIKE ?', ["%{$search}%"])
+                        ->orWhereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.message_short")) LIKE ?', ["%{$search}%"])
+                        // Search in other common fields
+                        ->orWhereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.phone")) LIKE ?', ["%{$search}%"])
+                        ->orWhereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.city")) LIKE ?', ["%{$search}%"])
+                        ->orWhereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.zip")) LIKE ?', ["%{$search}%"])
+                        // Fallback: search entire JSON
+                        ->orWhereRaw('CAST(data AS CHAR) LIKE ?', ["%{$search}%"]);
                 });
             })
             // Date range filter
@@ -474,33 +473,33 @@ class ContactController extends Controller
                             // Year fields
                             $q->where(function ($subQ) use ($birthYearMin, $birthYearMax) {
                                 $subQ->whereRaw('CAST(JSON_EXTRACT(data, "$.birth_year") AS UNSIGNED) BETWEEN ? AND ?', [$birthYearMin, $birthYearMax])
-                                     ->orWhereRaw('CAST(JSON_EXTRACT(data, "$.birthYear") AS UNSIGNED) BETWEEN ? AND ?', [$birthYearMin, $birthYearMax])
-                                     ->orWhereRaw('CAST(JSON_EXTRACT(data, "$.year_of_birth") AS UNSIGNED) BETWEEN ? AND ?', [$birthYearMin, $birthYearMax]);
+                                    ->orWhereRaw('CAST(JSON_EXTRACT(data, "$.birthYear") AS UNSIGNED) BETWEEN ? AND ?', [$birthYearMin, $birthYearMax])
+                                    ->orWhereRaw('CAST(JSON_EXTRACT(data, "$.year_of_birth") AS UNSIGNED) BETWEEN ? AND ?', [$birthYearMin, $birthYearMax]);
                             })
-                            // Date fields - extract year
-                            ->orWhere(function ($subQ) use ($birthYearMin, $birthYearMax) {
-                                $subQ->whereRaw('YEAR(STR_TO_DATE(JSON_UNQUOTE(JSON_EXTRACT(data, "$.bday")), "%Y-%m-%d")) BETWEEN ? AND ?', [$birthYearMin, $birthYearMax])
-                                     ->orWhereRaw('YEAR(STR_TO_DATE(JSON_UNQUOTE(JSON_EXTRACT(data, "$.birthday")), "%Y-%m-%d")) BETWEEN ? AND ?', [$birthYearMin, $birthYearMax]);
-                            });
+                                // Date fields - extract year
+                                ->orWhere(function ($subQ) use ($birthYearMin, $birthYearMax) {
+                                    $subQ->whereRaw('YEAR(STR_TO_DATE(JSON_UNQUOTE(JSON_EXTRACT(data, "$.bday")), "%Y-%m-%d")) BETWEEN ? AND ?', [$birthYearMin, $birthYearMax])
+                                        ->orWhereRaw('YEAR(STR_TO_DATE(JSON_UNQUOTE(JSON_EXTRACT(data, "$.birthday")), "%Y-%m-%d")) BETWEEN ? AND ?', [$birthYearMin, $birthYearMax]);
+                                });
                         });
                     } else {
                         // Only min or only max
                         if ($birthYearMin) {
                             $query->where(function ($q) use ($birthYearMin) {
                                 $q->whereRaw('CAST(JSON_EXTRACT(data, "$.birth_year") AS UNSIGNED) >= ?', [$birthYearMin])
-                                  ->orWhereRaw('CAST(JSON_EXTRACT(data, "$.birthYear") AS UNSIGNED) >= ?', [$birthYearMin])
-                                  ->orWhereRaw('CAST(JSON_EXTRACT(data, "$.year_of_birth") AS UNSIGNED) >= ?', [$birthYearMin])
-                                  ->orWhereRaw('YEAR(STR_TO_DATE(JSON_UNQUOTE(JSON_EXTRACT(data, "$.bday")), "%Y-%m-%d")) >= ?', [$birthYearMin])
-                                  ->orWhereRaw('YEAR(STR_TO_DATE(JSON_UNQUOTE(JSON_EXTRACT(data, "$.birthday")), "%Y-%m-%d")) >= ?', [$birthYearMin]);
+                                    ->orWhereRaw('CAST(JSON_EXTRACT(data, "$.birthYear") AS UNSIGNED) >= ?', [$birthYearMin])
+                                    ->orWhereRaw('CAST(JSON_EXTRACT(data, "$.year_of_birth") AS UNSIGNED) >= ?', [$birthYearMin])
+                                    ->orWhereRaw('YEAR(STR_TO_DATE(JSON_UNQUOTE(JSON_EXTRACT(data, "$.bday")), "%Y-%m-%d")) >= ?', [$birthYearMin])
+                                    ->orWhereRaw('YEAR(STR_TO_DATE(JSON_UNQUOTE(JSON_EXTRACT(data, "$.birthday")), "%Y-%m-%d")) >= ?', [$birthYearMin]);
                             });
                         }
                         if ($birthYearMax) {
                             $query->where(function ($q) use ($birthYearMax) {
                                 $q->whereRaw('CAST(JSON_EXTRACT(data, "$.birth_year") AS UNSIGNED) <= ?', [$birthYearMax])
-                                  ->orWhereRaw('CAST(JSON_EXTRACT(data, "$.birthYear") AS UNSIGNED) <= ?', [$birthYearMax])
-                                  ->orWhereRaw('CAST(JSON_EXTRACT(data, "$.year_of_birth") AS UNSIGNED) <= ?', [$birthYearMax])
-                                  ->orWhereRaw('YEAR(STR_TO_DATE(JSON_UNQUOTE(JSON_EXTRACT(data, "$.bday")), "%Y-%m-%d")) <= ?', [$birthYearMax])
-                                  ->orWhereRaw('YEAR(STR_TO_DATE(JSON_UNQUOTE(JSON_EXTRACT(data, "$.birthday")), "%Y-%m-%d")) <= ?', [$birthYearMax]);
+                                    ->orWhereRaw('CAST(JSON_EXTRACT(data, "$.birthYear") AS UNSIGNED) <= ?', [$birthYearMax])
+                                    ->orWhereRaw('CAST(JSON_EXTRACT(data, "$.year_of_birth") AS UNSIGNED) <= ?', [$birthYearMax])
+                                    ->orWhereRaw('YEAR(STR_TO_DATE(JSON_UNQUOTE(JSON_EXTRACT(data, "$.bday")), "%Y-%m-%d")) <= ?', [$birthYearMax])
+                                    ->orWhereRaw('YEAR(STR_TO_DATE(JSON_UNQUOTE(JSON_EXTRACT(data, "$.birthday")), "%Y-%m-%d")) <= ?', [$birthYearMax]);
                             });
                         }
                     }
@@ -515,22 +514,22 @@ class ContactController extends Controller
                         $maxBirthYear = $currentYear - $ageMin;
                         $query->where(function ($q) use ($maxBirthYear) {
                             $q->whereRaw('(CAST(JSON_EXTRACT(data, "$.birth_year") AS UNSIGNED) <= ? AND JSON_EXTRACT(data, "$.birth_year") IS NOT NULL)', [$maxBirthYear])
-                              ->orWhereRaw('(CAST(JSON_EXTRACT(data, "$.birthYear") AS UNSIGNED) <= ? AND JSON_EXTRACT(data, "$.birthYear") IS NOT NULL)', [$maxBirthYear])
-                              ->orWhereRaw('(CAST(JSON_EXTRACT(data, "$.year_of_birth") AS UNSIGNED) <= ? AND JSON_EXTRACT(data, "$.year_of_birth") IS NOT NULL)', [$maxBirthYear])
-                              ->orWhereRaw('(YEAR(STR_TO_DATE(JSON_UNQUOTE(JSON_EXTRACT(data, "$.bday")), "%Y-%m-%d")) <= ? AND JSON_EXTRACT(data, "$.bday") IS NOT NULL)', [$maxBirthYear])
-                              ->orWhereRaw('(YEAR(STR_TO_DATE(JSON_UNQUOTE(JSON_EXTRACT(data, "$.birthday")), "%Y-%m-%d")) <= ? AND JSON_EXTRACT(data, "$.birthday") IS NOT NULL)', [$maxBirthYear]);
+                                ->orWhereRaw('(CAST(JSON_EXTRACT(data, "$.birthYear") AS UNSIGNED) <= ? AND JSON_EXTRACT(data, "$.birthYear") IS NOT NULL)', [$maxBirthYear])
+                                ->orWhereRaw('(CAST(JSON_EXTRACT(data, "$.year_of_birth") AS UNSIGNED) <= ? AND JSON_EXTRACT(data, "$.year_of_birth") IS NOT NULL)', [$maxBirthYear])
+                                ->orWhereRaw('(YEAR(STR_TO_DATE(JSON_UNQUOTE(JSON_EXTRACT(data, "$.bday")), "%Y-%m-%d")) <= ? AND JSON_EXTRACT(data, "$.bday") IS NOT NULL)', [$maxBirthYear])
+                                ->orWhereRaw('(YEAR(STR_TO_DATE(JSON_UNQUOTE(JSON_EXTRACT(data, "$.birthday")), "%Y-%m-%d")) <= ? AND JSON_EXTRACT(data, "$.birthday") IS NOT NULL)', [$maxBirthYear]);
                         });
                     }
-                    
+
                     // Apply age max (person must be at most this old = birth year must be >= min birth year)
                     if ($ageMax) {
                         $minBirthYear = $currentYear - $ageMax;
                         $query->where(function ($q) use ($minBirthYear) {
                             $q->whereRaw('(CAST(JSON_EXTRACT(data, "$.birth_year") AS UNSIGNED) >= ? AND JSON_EXTRACT(data, "$.birth_year") IS NOT NULL)', [$minBirthYear])
-                              ->orWhereRaw('(CAST(JSON_EXTRACT(data, "$.birthYear") AS UNSIGNED) >= ? AND JSON_EXTRACT(data, "$.birthYear") IS NOT NULL)', [$minBirthYear])
-                              ->orWhereRaw('(CAST(JSON_EXTRACT(data, "$.year_of_birth") AS UNSIGNED) >= ? AND JSON_EXTRACT(data, "$.year_of_birth") IS NOT NULL)', [$minBirthYear])
-                              ->orWhereRaw('(YEAR(STR_TO_DATE(JSON_UNQUOTE(JSON_EXTRACT(data, "$.bday")), "%Y-%m-%d")) >= ? AND JSON_EXTRACT(data, "$.bday") IS NOT NULL)', [$minBirthYear])
-                              ->orWhereRaw('(YEAR(STR_TO_DATE(JSON_UNQUOTE(JSON_EXTRACT(data, "$.birthday")), "%Y-%m-%d")) >= ? AND JSON_EXTRACT(data, "$.birthday") IS NOT NULL)', [$minBirthYear]);
+                                ->orWhereRaw('(CAST(JSON_EXTRACT(data, "$.birthYear") AS UNSIGNED) >= ? AND JSON_EXTRACT(data, "$.birthYear") IS NOT NULL)', [$minBirthYear])
+                                ->orWhereRaw('(CAST(JSON_EXTRACT(data, "$.year_of_birth") AS UNSIGNED) >= ? AND JSON_EXTRACT(data, "$.year_of_birth") IS NOT NULL)', [$minBirthYear])
+                                ->orWhereRaw('(YEAR(STR_TO_DATE(JSON_UNQUOTE(JSON_EXTRACT(data, "$.bday")), "%Y-%m-%d")) >= ? AND JSON_EXTRACT(data, "$.bday") IS NOT NULL)', [$minBirthYear])
+                                ->orWhereRaw('(YEAR(STR_TO_DATE(JSON_UNQUOTE(JSON_EXTRACT(data, "$.birthday")), "%Y-%m-%d")) >= ? AND JSON_EXTRACT(data, "$.birthday") IS NOT NULL)', [$minBirthYear]);
                         });
                     }
                 });
@@ -539,17 +538,17 @@ class ContactController extends Controller
             ->when($zipCode, function ($q, $zipCode) {
                 $q->where(function ($query) use ($zipCode) {
                     $query->whereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.zip")) LIKE ?', ["%{$zipCode}%"])
-                          ->orWhereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.zip_code")) LIKE ?', ["%{$zipCode}%"])
-                          ->orWhereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.postal_code")) LIKE ?', ["%{$zipCode}%"])
-                          ->orWhereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.plz")) LIKE ?', ["%{$zipCode}%"]);
+                        ->orWhereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.zip_code")) LIKE ?', ["%{$zipCode}%"])
+                        ->orWhereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.postal_code")) LIKE ?', ["%{$zipCode}%"])
+                        ->orWhereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.plz")) LIKE ?', ["%{$zipCode}%"]);
                 });
             })
             // City filter
             ->when($city, function ($q, $city) {
                 $q->where(function ($query) use ($city) {
                     $query->whereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.city")) LIKE ?', ["%{$city}%"])
-                          ->orWhereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.place")) LIKE ?', ["%{$city}%"])
-                          ->orWhereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.location")) LIKE ?', ["%{$city}%"]);
+                        ->orWhereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.place")) LIKE ?', ["%{$city}%"])
+                        ->orWhereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.location")) LIKE ?', ["%{$city}%"]);
                 });
             })
             // Gender filter
@@ -561,26 +560,26 @@ class ContactController extends Controller
                         'f' => ['f', 'female', 'F', 'Female', 'FEMALE', 'feminine'],
                         'd' => ['d', 'diverse', 'D', 'Diverse', 'DIVERSE', 'other'],
                     ];
-                    
+
                     $searchValues = $genderMap[strtolower($gender)] ?? [strtolower($gender)];
-                    
+
                     // Build query for each possible value - use case-insensitive matching with JSON_UNQUOTE
                     $first = true;
                     foreach ($searchValues as $value) {
                         if ($first) {
                             $query->where(function ($q) use ($value) {
                                 $q->whereRaw('LOWER(JSON_UNQUOTE(JSON_EXTRACT(data, "$.gender"))) = ?', [strtolower($value)])
-                                  ->orWhereRaw('LOWER(JSON_UNQUOTE(JSON_EXTRACT(data, "$.sex"))) = ?', [strtolower($value)])
-                                  ->orWhereRaw('LOWER(JSON_UNQUOTE(JSON_EXTRACT(data, "$.gender"))) LIKE ?', ["%".strtolower($value)."%"])
-                                  ->orWhereRaw('LOWER(JSON_UNQUOTE(JSON_EXTRACT(data, "$.sex"))) LIKE ?', ["%".strtolower($value)."%"]);
+                                    ->orWhereRaw('LOWER(JSON_UNQUOTE(JSON_EXTRACT(data, "$.sex"))) = ?', [strtolower($value)])
+                                    ->orWhereRaw('LOWER(JSON_UNQUOTE(JSON_EXTRACT(data, "$.gender"))) LIKE ?', ["%" . strtolower($value) . "%"])
+                                    ->orWhereRaw('LOWER(JSON_UNQUOTE(JSON_EXTRACT(data, "$.sex"))) LIKE ?', ["%" . strtolower($value) . "%"]);
                             });
                             $first = false;
                         } else {
                             $query->orWhere(function ($q) use ($value) {
                                 $q->whereRaw('LOWER(JSON_UNQUOTE(JSON_EXTRACT(data, "$.gender"))) = ?', [strtolower($value)])
-                                  ->orWhereRaw('LOWER(JSON_UNQUOTE(JSON_EXTRACT(data, "$.sex"))) = ?', [strtolower($value)])
-                                  ->orWhereRaw('LOWER(JSON_UNQUOTE(JSON_EXTRACT(data, "$.gender"))) LIKE ?', ["%".strtolower($value)."%"])
-                                  ->orWhereRaw('LOWER(JSON_UNQUOTE(JSON_EXTRACT(data, "$.sex"))) LIKE ?', ["%".strtolower($value)."%"]);
+                                    ->orWhereRaw('LOWER(JSON_UNQUOTE(JSON_EXTRACT(data, "$.sex"))) = ?', [strtolower($value)])
+                                    ->orWhereRaw('LOWER(JSON_UNQUOTE(JSON_EXTRACT(data, "$.gender"))) LIKE ?', ["%" . strtolower($value) . "%"])
+                                    ->orWhereRaw('LOWER(JSON_UNQUOTE(JSON_EXTRACT(data, "$.sex"))) LIKE ?', ["%" . strtolower($value) . "%"]);
                             });
                         }
                     }
@@ -637,14 +636,14 @@ class ContactController extends Controller
 
         // Detect available fields - PRIORITY: Form-level (show only THIS form's fields)
         $formFields = $this->detectAvailableFields($webformId);
-        
+
         // Get type and station fields for reference (used for preference inheritance, not for display)
         $typeFields = $submissionForm ? $this->detectAvailableFields(null, $submissionForm, $station) : [];
         $stationFields = $this->detectAvailableFields(null, null, $station);
-        
+
         // Get new fields notification (fields detected since last visit)
         $newFields = $this->getNewFields($webformId);
-        
+
         // Get smart defaults: First 4 fields from THIS form's JSON data
         // This ensures each form shows its most relevant fields by default
         $smartDefaults = FormDefaultsHelper::getDefaultsForForm($webformId, $submissionForm, $station, 'list');
@@ -687,25 +686,26 @@ class ContactController extends Controller
      */
     public function show(ContactSubmission $submission): Response
     {
-        // Mark as read by current user
+        // Mark as read by current user when opening the detail view (legacy behavior).
+        // This is idempotent because markAsReadBy uses firstOrCreate.
         $submission->markAsReadBy(auth()->id());
 
-        // Load with reads and users
+        // Load with reads and users so the frontend knows the current state.
         $submission->load(['readsWithUsers']);
 
         // Detect available fields - Form-specific (from this submission's form)
         $formFields = $this->detectAvailableFields($submission->webform_id);
         $typeFields = $submission->submission_form ? $this->detectAvailableFields(null, $submission->submission_form, $submission->station) : [];
         $stationFields = $submission->station ? $this->detectAvailableFields(null, null, $submission->station) : [];
-        
+
         // Get new fields notification
         $newFields = $submission->webform_id ? $this->getNewFields($submission->webform_id) : [];
         $newFieldKeys = array_column($newFields, 'key');
-        
+
         // Get smart defaults: First 4 fields from THIS form's JSON data
         $smartDefaults = FormDefaultsHelper::getDefaultsForForm(
             $submission->webform_id ?? '',
-            $submission->submission_form, 
+            $submission->submission_form,
             $submission->station,
             'detail'
         );
@@ -723,7 +723,7 @@ class ContactController extends Controller
     /**
      * Mark a submission as read/unread by current user.
      */
-    public function toggleRead(ContactSubmission $submission): RedirectResponse
+    public function toggleRead(Request $request, ContactSubmission $submission)
     {
         $userId = auth()->id();
         $existingRead = $submission->reads()->where('user_id', $userId)->first();
@@ -738,6 +738,28 @@ class ContactController extends Controller
             $message = 'Marked as read';
         }
 
+        // Reload reads with user info for accurate response
+        $submission->load(['readsWithUsers']);
+
+        // If the request expects JSON (AJAX), return the updated reads list
+        if ($request->expectsJson() || $request->ajax()) {
+            return response()->json([
+                'success' => true,
+                'message' => $message,
+                'reads' => $submission->readsWithUsers->map(function ($r) {
+                    return [
+                        'id' => $r->id,
+                        'user_id' => $r->user_id,
+                        'read_at' => $r->read_at ? $r->read_at->toDateTimeString() : null,
+                        'user' => [
+                            'id' => $r->user->id ?? null,
+                            'name' => $r->user->name ?? null,
+                        ],
+                    ];
+                })->all(),
+            ]);
+        }
+
         return back()->with('success', $message);
     }
 
@@ -748,7 +770,7 @@ class ContactController extends Controller
     {
         try {
             $submission->delete();
-            
+
             return redirect()->route('contact.index')->with('success', 'Contact submission deleted permanently.');
         } catch (\Exception $e) {
             return back()->with('error', 'Failed to delete contact submission.');

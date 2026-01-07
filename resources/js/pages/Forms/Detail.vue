@@ -1,40 +1,50 @@
 <script setup lang="ts">
-import AppLayout from '@/layouts/AppLayout.vue';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Checkbox } from '@/components/ui/checkbox';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
-import { Head, Link, router, usePage } from '@inertiajs/vue3';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Input } from '@/components/ui/input';
+import {
+    Table,
+    TableBody,
+    TableCell,
+    TableHead,
+    TableHeader,
+    TableRow,
+} from '@/components/ui/table';
+import { useFieldPreferences } from '@/composables/useFieldPreferences';
+import AppLayout from '@/layouts/AppLayout.vue';
+import {
+    destroy as contactDestroy,
+    show as contactShow,
+    toggleRead as contactToggleRead,
+} from '@/routes/contact';
 import { dashboard as userDashboard } from '@/routes/user';
-import { show as contactShow, toggleRead as contactToggleRead, destroy as contactDestroy } from '@/routes/contact';
-import { 
-    ArrowLeft,
-    Search, 
-    Eye, 
-    Trash2, 
-    CheckCircle2,
+import { type BreadcrumbItem } from '@/types';
+import {
+    formatFieldValue,
+    groupFieldsByCategory,
+} from '@/utils/fieldDetection';
+import { Head, Link, router, usePage } from '@inertiajs/vue3';
+import {
     AlertCircle,
-    FileText,
-    Download,
-    Edit,
-    Save,
-    X,
-    Filter,
+    ArrowLeft,
+    CheckCircle2,
     ChevronDown,
     ChevronUp,
-    XCircle,
-    Settings,
     Columns,
-    Bookmark,
-    BookmarkCheck
+    Download,
+    Edit,
+    Eye,
+    FileText,
+    Filter,
+    Save,
+    Search,
+    Trash2,
+    X,
+    XCircle,
 } from 'lucide-vue-next';
-import { ref, computed, onMounted } from 'vue';
-import { type BreadcrumbItem } from '@/types';
-import { useFieldPreferences } from '@/composables/useFieldPreferences';
-import { groupFieldsByCategory, formatFieldValue } from '@/utils/fieldDetection';
+import { computed, onMounted, ref } from 'vue';
 
 interface ContactSubmission {
     id: number;
@@ -178,7 +188,10 @@ const clearNewFields = async () => {
         await fetch(`/forms/${props.webformId}/clear-new-fields`, {
             method: 'POST',
             headers: {
-                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '',
+                'X-CSRF-TOKEN':
+                    document
+                        .querySelector('meta[name="csrf-token"]')
+                        ?.getAttribute('content') || '',
             },
         });
     } catch (error) {
@@ -189,7 +202,7 @@ const clearNewFields = async () => {
 // Column visibility - combine system columns with user-selected fields
 const visibleColumns = computed(() => {
     const cols = new Set<string>(['checkbox', 'status', 'id', 'actions']); // System columns always visible
-    visibleFields.value.forEach(field => cols.add(field));
+    visibleFields.value.forEach((field) => cols.add(field));
     return cols;
 });
 
@@ -197,7 +210,9 @@ const showColumnSettings = ref(false);
 
 // Sorting
 const sortColumn = ref<string>(props.sortColumn || 'created_at');
-const sortDirection = ref<'asc' | 'desc'>((props.sortDirection as 'asc' | 'desc') || 'desc');
+const sortDirection = ref<'asc' | 'desc'>(
+    (props.sortDirection as 'asc' | 'desc') || 'desc',
+);
 
 // Removed preset system - using single preference only (auto-saves on checkbox change)
 
@@ -209,12 +224,12 @@ const allAvailableFields = computed(() => {
     if (props.availableFields && props.availableFields.length > 0) {
         return props.availableFields;
     }
-    
+
     // FALLBACK: If no form-specific fields, use type-level (for new forms)
     if (props.typeFields && props.typeFields.length > 0) {
         return props.typeFields;
     }
-    
+
     // FALLBACK: Use station-level fields
     return props.stationFields || [];
 });
@@ -224,11 +239,15 @@ const isNewField = (fieldKey: string): boolean => {
     return props.newFields?.includes(fieldKey) || false;
 };
 
-const groupedFields = computed(() => groupFieldsByCategory(allAvailableFields.value));
+const groupedFields = computed(() =>
+    groupFieldsByCategory(allAvailableFields.value),
+);
 
 // Computed property for visible fields (ensures reactivity)
 const visibleFieldList = computed(() => {
-    return allAvailableFields.value.filter(f => visibleFields.value.has(f.key));
+    return allAvailableFields.value.filter((f) =>
+        visibleFields.value.has(f.key),
+    );
 });
 
 // Computed property that returns the Set directly for template use
@@ -252,13 +271,15 @@ const getFieldChecked = (fieldKey: string) => {
                 }
                 visibleFields.value = newSet;
             }
-        }
+        },
     });
 };
 
 // Check if current user has read the submission
 const isReadByCurrentUser = (submission: ContactSubmission): boolean => {
-    return submission.reads_with_users.some(read => read.user_id === authUser.value?.id);
+    return submission.reads_with_users.some(
+        (read) => read.user_id === authUser.value?.id,
+    );
 };
 
 // Get initials for avatar - handles full name or separate first/last names
@@ -274,7 +295,7 @@ const getInitials = (name: string | undefined, data?: any): string => {
     }
     // Fallback to name string
     if (!name || typeof name !== 'string') return '??';
-    const parts = name.split(' ').filter(p => p.length > 0);
+    const parts = name.split(' ').filter((p) => p.length > 0);
     if (parts.length >= 2) {
         return `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase();
     }
@@ -291,13 +312,15 @@ const getDisplayName = (data: any): string => {
         return `${data.first_name} ${data.last_name}`;
     }
     // Try single name fields
-    return data?.name 
-        || data?.fname 
-        || data?.first_name 
-        || data?.full_name 
-        || data?.contact_name 
-        || data?.email 
-        || 'Unknown';
+    return (
+        data?.name ||
+        data?.fname ||
+        data?.first_name ||
+        data?.full_name ||
+        data?.contact_name ||
+        data?.email ||
+        'Unknown'
+    );
 };
 
 // Get display email
@@ -308,13 +331,15 @@ const getDisplayEmail = (data: any): string => {
 // Get message text - handles multiple message field variations
 const getMessageText = (data: any): string => {
     // Prefer message_long, then message_short, then other fields
-    return data?.message_long 
-        || data?.message_short 
-        || data?.description 
-        || data?.message 
-        || data?.content 
-        || data?.text 
-        || 'No message content';
+    return (
+        data?.message_long ||
+        data?.message_short ||
+        data?.description ||
+        data?.message ||
+        data?.content ||
+        data?.text ||
+        'No message content'
+    );
 };
 
 // Toggle row selection
@@ -331,7 +356,7 @@ const toggleAllRows = () => {
     if (selectedRows.value.size === props.submissions.data?.length) {
         selectedRows.value.clear();
     } else {
-        props.submissions.data?.forEach(submission => {
+        props.submissions.data?.forEach((submission) => {
             selectedRows.value.add(submission.id);
         });
     }
@@ -369,7 +394,7 @@ const saveEditing = async (submission: ContactSubmission) => {
 // Apply filters
 const applyFilters = () => {
     const params: any = {};
-    
+
     // Filters
     if (searchQuery.value) params.search = searchQuery.value;
     if (selectedStatus.value !== 'all') params.status = selectedStatus.value;
@@ -387,14 +412,14 @@ const applyFilters = () => {
         params.radius_lat = radiusLat.value;
         params.radius_lng = radiusLng.value;
     }
-    
+
     // Sorting
     if (sortColumn.value) params.sort_column = sortColumn.value;
     if (sortDirection.value) params.sort_direction = sortDirection.value;
 
     router.get(`/forms/${props.webformId}`, params, {
         preserveState: true,
-        replace: true
+        replace: true,
     });
 };
 
@@ -420,8 +445,12 @@ const clearFilters = () => {
 // Bulk delete
 const bulkDelete = () => {
     if (selectedRows.value.size === 0) return;
-    
-    if (confirm(`Are you sure you want to delete ${selectedRows.value.size} submission(s)?`)) {
+
+    if (
+        confirm(
+            `Are you sure you want to delete ${selectedRows.value.size} submission(s)?`,
+        )
+    ) {
         // TODO: Implement bulk delete API call
         selectedRows.value.clear();
     }
@@ -430,7 +459,7 @@ const bulkDelete = () => {
 // Bulk mark as read
 const bulkMarkAsRead = () => {
     if (selectedRows.value.size === 0) return;
-    
+
     // TODO: Implement bulk mark as read API call
     selectedRows.value.clear();
 };
@@ -438,21 +467,33 @@ const bulkMarkAsRead = () => {
 // Export selected
 const exportSelected = () => {
     if (selectedRows.value.size === 0) return;
-    
+
     // TODO: Implement export functionality
     console.log('Exporting:', Array.from(selectedRows.value));
 };
 
 // Toggle read status
-const toggleRead = (submission: ContactSubmission) => {
-    router.post(contactToggleRead(submission.id).url, {}, {
-        preserveScroll: true
-    });
+import { postJson } from '@/lib/api';
+
+const toggleRead = async (submission: ContactSubmission) => {
+    try {
+        await postJson(contactToggleRead(submission.id).url);
+
+        // Refresh the current page so the list reflects DB changes
+        await router.get(window.location.pathname + window.location.search, {
+            preserveState: false,
+            preserveScroll: true,
+        });
+    } catch (error) {
+        console.error('Error toggling read status:', error);
+    }
 };
 
 // Delete submission
 const deleteSubmission = (submission: ContactSubmission) => {
-    if (confirm('Are you sure you want to permanently delete this submission?')) {
+    if (
+        confirm('Are you sure you want to permanently delete this submission?')
+    ) {
         router.delete(contactDestroy(submission.id).url);
     }
 };
@@ -467,7 +508,7 @@ const handleFieldCheckboxChange = async (fieldKey: string) => {
         return;
     }
     console.log('Current state before:', visibleFields.value.has(fieldKey));
-    
+
     try {
         // Toggle the field
         const newSet = new Set(visibleFields.value);
@@ -479,16 +520,16 @@ const handleFieldCheckboxChange = async (fieldKey: string) => {
             console.log('Added field:', fieldKey);
         }
         visibleFields.value = newSet;
-        
+
         console.log('Current state after:', visibleFields.value.has(fieldKey));
         console.log('All visible fields:', Array.from(visibleFields.value));
         console.log('visibleFields.size:', visibleFields.value.size);
-        
+
         // Auto-save
         console.log('Calling saveColumnPreferences...');
         const saveResult = await saveColumnPreferences();
         console.log('Save result:', saveResult);
-        
+
         if (saveResult) {
             console.log('✅ Preferences saved successfully');
         } else {
@@ -506,40 +547,48 @@ const handleFieldCheckboxChange = async (fieldKey: string) => {
 // Save column preferences - saves as single default preference (auto-save on change)
 const saveColumnPreferences = async (): Promise<boolean> => {
     console.log('=== saveColumnPreferences called ===');
-    
+
     // Ensure we have the latest value (handle both ref and unwrapped cases)
     const currentFields = visibleFields.value || visibleFields;
     if (!currentFields) {
-        console.error('❌ visibleFields is undefined in saveColumnPreferences!');
+        console.error(
+            '❌ visibleFields is undefined in saveColumnPreferences!',
+        );
         return false;
     }
-    
+
     // Get ONLY the fields that are currently checked (in visibleFields)
     const checkedFields = Array.from(currentFields);
     console.log('✅ Current visibleFields state:', checkedFields);
     console.log('✅ visibleFields.size:', currentFields.size);
-    console.log('✅ visibleFields type:', currentFields instanceof Set ? 'Set' : typeof currentFields);
-    
-    // Only save fields that exist in availableFields (prevent saving non-existent fields)
-    const validFields = checkedFields.filter(fieldKey => 
-        allAvailableFields.value.some(f => f.key === fieldKey)
+    console.log(
+        '✅ visibleFields type:',
+        currentFields instanceof Set ? 'Set' : typeof currentFields,
     );
-    
+
+    // Only save fields that exist in availableFields (prevent saving non-existent fields)
+    const validFields = checkedFields.filter((fieldKey) =>
+        allAvailableFields.value.some((f) => f.key === fieldKey),
+    );
+
     console.log('Valid fields to save:', validFields);
-    console.log('All available fields:', allAvailableFields.value.map(f => f.key));
-    
+    console.log(
+        'All available fields:',
+        allAvailableFields.value.map((f) => f.key),
+    );
+
     if (validFields.length === 0) {
         console.warn('⚠️ No valid fields to save - skipping');
         return false;
     }
-    
+
     console.log('Calling savePreferences with:', {
         fields: validFields,
         preferenceName: 'list-view-columns',
         asDefault: true,
-        category: categoryPath.value
+        category: categoryPath.value,
     });
-    
+
     // Save as single default preference (is_default: true)
     // This replaces any existing preference for this category
     try {
@@ -579,7 +628,7 @@ const toggleSort = (column: string) => {
 const onFieldCheckboxClick = (fieldKey: string, e?: MouseEvent) => {
     e?.preventDefault();
     e?.stopPropagation();
-    handleFieldCheckboxChange(fieldKey).catch(err => {
+    handleFieldCheckboxChange(fieldKey).catch((err) => {
         console.error('Error in handleFieldCheckboxChange:', err);
     });
 };
@@ -589,37 +638,64 @@ onMounted(async () => {
     console.log('=== MOUNTED ===');
     console.log('visibleFields ref:', visibleFields);
     console.log('visibleFields.value:', visibleFields?.value);
-    
+
     // Auto-apply filters on mount if they exist
     if (searchQuery.value || selectedStatus.value !== 'all') {
         applyFilters();
     }
-    
+
     // Load user preferences
     await loadPreferencesWrapper();
-    
+
     // Test: Verify functions are accessible
-    console.log('handleFieldCheckboxChange function:', typeof handleFieldCheckboxChange);
-    console.log('saveColumnPreferences function:', typeof saveColumnPreferences);
-    console.log('visibleFields after load:', visibleFields?.value ? Array.from(visibleFields.value) : 'undefined');
-    console.log('visibleFields.size after load:', visibleFields?.value?.size || 0);
-    console.log('visibleFieldsSet computed:', Array.from(visibleFieldsSet.value));
+    console.log(
+        'handleFieldCheckboxChange function:',
+        typeof handleFieldCheckboxChange,
+    );
+    console.log(
+        'saveColumnPreferences function:',
+        typeof saveColumnPreferences,
+    );
+    console.log(
+        'visibleFields after load:',
+        visibleFields?.value ? Array.from(visibleFields.value) : 'undefined',
+    );
+    console.log(
+        'visibleFields.size after load:',
+        visibleFields?.value?.size || 0,
+    );
+    console.log(
+        'visibleFieldsSet computed:',
+        Array.from(visibleFieldsSet.value),
+    );
     console.log('visibleFieldsSet.size:', visibleFieldsSet.value.size);
     console.log('allAvailableFields:', allAvailableFields.value);
-    
+
     // Verify checkbox state for a few fields
-    if (visibleFieldsSet.value.size > 0 && allAvailableFields.value.length > 0) {
+    if (
+        visibleFieldsSet.value.size > 0 &&
+        allAvailableFields.value.length > 0
+    ) {
         const testFields = ['email', 'fname', 'lname', 'sid', 'zip'];
-        testFields.forEach(fieldKey => {
+        testFields.forEach((fieldKey) => {
             const isVisible = visibleFieldsSet.value.has(fieldKey);
-            console.log(`Field "${fieldKey}": visibleFieldsSet.has()=${isVisible}`);
+            console.log(
+                `Field "${fieldKey}": visibleFieldsSet.has()=${isVisible}`,
+            );
         });
     }
-    
+
     // If no preferences loaded, use smart defaults
-    if (visibleFields && visibleFields.value && visibleFields.value.size === 0 && allAvailableFields.value.length > 0) {
+    if (
+        visibleFields &&
+        visibleFields.value &&
+        visibleFields.value.size === 0 &&
+        allAvailableFields.value.length > 0
+    ) {
         console.log('No preferences found, using smart defaults');
-        const defaults = props.smartDefaults || allAvailableFields.value.slice(0, 4).map(f => f.key);
+        const defaults =
+            props.smartDefaults ||
+            allAvailableFields.value.slice(0, 4).map((f) => f.key);
         if (visibleFields.value) {
             visibleFields.value = new Set(defaults);
             console.log('Set defaults:', Array.from(visibleFields.value));
@@ -632,7 +708,9 @@ onMounted(async () => {
     <Head :title="`${formName} - Submissions`" />
 
     <AppLayout :breadcrumbs="breadcrumbs">
-        <div class="flex h-full flex-1 flex-col gap-6 overflow-x-auto rounded-xl p-4">
+        <div
+            class="flex h-full flex-1 flex-col gap-6 overflow-x-auto rounded-xl p-4"
+        >
             <!-- Header -->
             <div class="flex items-center justify-between">
                 <div class="flex items-center gap-4">
@@ -643,12 +721,18 @@ onMounted(async () => {
                         </Button>
                     </Link>
                     <div>
-                        <h1 class="text-3xl font-bold tracking-tight flex items-center gap-2">
+                        <h1
+                            class="flex items-center gap-2 text-3xl font-bold tracking-tight"
+                        >
                             <FileText class="h-6 w-6" />
                             {{ formName }}
                         </h1>
-                        <p class="text-muted-foreground mt-1">
-                            {{ totalCount }} total {{ totalCount === 1 ? 'submission' : 'submissions' }} • Station: {{ station }}
+                        <p class="mt-1 text-muted-foreground">
+                            {{ totalCount }} total
+                            {{
+                                totalCount === 1 ? 'submission' : 'submissions'
+                            }}
+                            • Station: {{ station }}
                         </p>
                         <p class="text-xs text-muted-foreground">
                             Form ID: {{ webformId }}
@@ -656,7 +740,9 @@ onMounted(async () => {
                     </div>
                 </div>
                 <div class="flex items-center gap-2">
-                    <Badge variant="secondary" class="h-8 px-3">{{ station }}</Badge>
+                    <Badge variant="secondary" class="h-8 px-3">{{
+                        station
+                    }}</Badge>
                 </div>
             </div>
 
@@ -669,20 +755,36 @@ onMounted(async () => {
                             Show/Hide Columns
                         </CardTitle>
                         <div class="flex gap-2">
-                            <Button variant="ghost" size="sm" @click="async () => { 
-                                const newSet = new Set(visibleFields);
-                                allAvailableFields.forEach((f: FieldInfo) => {
-                                    newSet.add(f.key);
-                                });
-                                visibleFields = newSet;
-                                await saveColumnPreferences();
-                            }" class="h-8 text-xs">
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                @click="
+                                    async () => {
+                                        const newSet = new Set(visibleFields);
+                                        allAvailableFields.forEach(
+                                            (f: FieldInfo) => {
+                                                newSet.add(f.key);
+                                            },
+                                        );
+                                        visibleFields = newSet;
+                                        await saveColumnPreferences();
+                                    }
+                                "
+                                class="h-8 text-xs"
+                            >
                                 Select All
                             </Button>
-                            <Button variant="ghost" size="sm" @click="async () => {
-                                visibleFields = new Set();
-                                await saveColumnPreferences();
-                            }" class="h-8 text-xs">
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                @click="
+                                    async () => {
+                                        visibleFields = new Set();
+                                        await saveColumnPreferences();
+                                    }
+                                "
+                                class="h-8 text-xs"
+                            >
                                 Clear All
                             </Button>
                         </div>
@@ -690,48 +792,62 @@ onMounted(async () => {
                 </CardHeader>
                 <CardContent>
                     <div class="flex flex-wrap gap-4">
-                        <label 
-                            v-for="field in allAvailableFields" 
+                        <label
+                            v-for="field in allAvailableFields"
                             :key="field.key"
-                            class="flex items-center gap-2 cursor-pointer hover:bg-muted p-2 rounded transition-colors"
+                            class="flex cursor-pointer items-center gap-2 rounded p-2 transition-colors hover:bg-muted"
                         >
                             <input
                                 type="checkbox"
                                 :checked="visibleFields.has(field.key)"
-                                @change="async () => {
-                                    const newSet = new Set(visibleFields);
-                                    if (newSet.has(field.key)) {
-                                        newSet.delete(field.key);
-                                    } else {
-                                        newSet.add(field.key);
+                                @change="
+                                    async () => {
+                                        const newSet = new Set(visibleFields);
+                                        if (newSet.has(field.key)) {
+                                            newSet.delete(field.key);
+                                        } else {
+                                            newSet.add(field.key);
+                                        }
+                                        visibleFields = newSet;
+                                        await saveColumnPreferences();
                                     }
-                                    visibleFields = newSet;
-                                    await saveColumnPreferences();
-                                }"
-                                class="w-4 h-4 text-primary border-gray-300 rounded focus:ring-primary"
+                                "
+                                class="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
                             />
-                            <span class="text-sm font-medium select-none">{{ field.label }}</span>
-                            <Badge 
-                                v-if="isNewField(field.key)" 
-                                variant="secondary" 
-                                class="ml-1 text-xs bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300"
+                            <span class="text-sm font-medium select-none">{{
+                                field.label
+                            }}</span>
+                            <Badge
+                                v-if="isNewField(field.key)"
+                                variant="secondary"
+                                class="ml-1 bg-blue-100 text-xs text-blue-700 dark:bg-blue-900 dark:text-blue-300"
                             >
                                 New
                             </Badge>
                         </label>
                     </div>
-                    <div class="mt-3 text-xs text-muted-foreground border-t pt-3">
+                    <div
+                        class="mt-3 border-t pt-3 text-xs text-muted-foreground"
+                    >
                         <div class="flex items-center gap-2">
-                            <span v-if="savingPrefs" class="text-blue-600 animate-pulse">Saving...</span>
-                            <span v-else-if="visibleFields.size > 0" class="text-green-600">✓ Saved</span>
+                            <span
+                                v-if="savingPrefs"
+                                class="animate-pulse text-blue-600"
+                                >Saving...</span
+                            >
+                            <span
+                                v-else-if="visibleFields.size > 0"
+                                class="text-green-600"
+                                >✓ Saved</span
+                            >
                         </div>
                         <div class="mt-1">
-                            Preference level: <strong>Type</strong> (applies to all {{ submissionForm || 'forms' }} forms)
+                            Preference level: <strong>Type</strong> (applies to
+                            all {{ submissionForm || 'forms' }} forms)
                         </div>
                     </div>
                 </CardContent>
             </Card>
-
 
             <!-- Filters -->
             <Card>
@@ -742,16 +858,28 @@ onMounted(async () => {
                             Filters
                         </CardTitle>
                         <div class="flex gap-2">
-                            <Button 
-                                variant="ghost" 
+                            <Button
+                                variant="ghost"
                                 size="sm"
-                                @click="showAdvancedFilters = !showAdvancedFilters"
+                                @click="
+                                    showAdvancedFilters = !showAdvancedFilters
+                                "
                             >
-                                {{ showAdvancedFilters ? 'Hide' : 'Show' }} Advanced
-                                <ChevronDown v-if="!showAdvancedFilters" class="ml-2 h-4 w-4" />
+                                {{
+                                    showAdvancedFilters ? 'Hide' : 'Show'
+                                }}
+                                Advanced
+                                <ChevronDown
+                                    v-if="!showAdvancedFilters"
+                                    class="ml-2 h-4 w-4"
+                                />
                                 <ChevronUp v-else class="ml-2 h-4 w-4" />
                             </Button>
-                            <Button variant="outline" size="sm" @click="clearFilters">
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                @click="clearFilters"
+                            >
                                 <XCircle class="mr-2 h-4 w-4" />
                                 Clear All
                             </Button>
@@ -760,7 +888,7 @@ onMounted(async () => {
                 </CardHeader>
                 <CardContent>
                     <!-- Basic Filters -->
-                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                    <div class="mb-4 grid grid-cols-1 gap-4 md:grid-cols-3">
                         <div class="space-y-2">
                             <label class="text-sm font-medium">Search</label>
                             <Input
@@ -771,7 +899,7 @@ onMounted(async () => {
                         </div>
                         <div class="space-y-2">
                             <label class="text-sm font-medium">Status</label>
-                            <select 
+                            <select
                                 v-model="selectedStatus"
                                 class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
                             >
@@ -781,7 +909,9 @@ onMounted(async () => {
                             </select>
                         </div>
                         <div class="space-y-2">
-                            <label class="text-sm font-medium">Date Range</label>
+                            <label class="text-sm font-medium"
+                                >Date Range</label
+                            >
                             <div class="flex gap-2">
                                 <Input
                                     v-model="dateFrom"
@@ -800,12 +930,18 @@ onMounted(async () => {
                     </div>
 
                     <!-- Advanced Filters -->
-                    <div v-if="showAdvancedFilters" class="border-t pt-4 mt-4">
-                        <h3 class="text-sm font-semibold mb-4">Advanced Filters</h3>
-                        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    <div v-if="showAdvancedFilters" class="mt-4 border-t pt-4">
+                        <h3 class="mb-4 text-sm font-semibold">
+                            Advanced Filters
+                        </h3>
+                        <div
+                            class="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3"
+                        >
                             <!-- Age Range -->
                             <div class="space-y-2">
-                                <label class="text-sm font-medium">Age Range</label>
+                                <label class="text-sm font-medium"
+                                    >Age Range</label
+                                >
                                 <div class="flex gap-2">
                                     <Input
                                         v-model="ageMin"
@@ -826,7 +962,9 @@ onMounted(async () => {
 
                             <!-- Birth Year Range -->
                             <div class="space-y-2">
-                                <label class="text-sm font-medium">Birth Year Range</label>
+                                <label class="text-sm font-medium"
+                                    >Birth Year Range</label
+                                >
                                 <div class="flex gap-2">
                                     <Input
                                         v-model="birthYearMin"
@@ -847,7 +985,9 @@ onMounted(async () => {
 
                             <!-- ZIP Code -->
                             <div class="space-y-2">
-                                <label class="text-sm font-medium">ZIP Code</label>
+                                <label class="text-sm font-medium"
+                                    >ZIP Code</label
+                                >
                                 <Input
                                     v-model="zipCode"
                                     placeholder="ZIP/Postal Code"
@@ -856,7 +996,9 @@ onMounted(async () => {
 
                             <!-- City -->
                             <div class="space-y-2">
-                                <label class="text-sm font-medium">City / Place</label>
+                                <label class="text-sm font-medium"
+                                    >City / Place</label
+                                >
                                 <Input
                                     v-model="city"
                                     placeholder="City or place of residence"
@@ -865,8 +1007,10 @@ onMounted(async () => {
 
                             <!-- Gender -->
                             <div class="space-y-2">
-                                <label class="text-sm font-medium">Gender</label>
-                                <select 
+                                <label class="text-sm font-medium"
+                                    >Gender</label
+                                >
+                                <select
                                     v-model="gender"
                                     class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
                                 >
@@ -879,7 +1023,9 @@ onMounted(async () => {
 
                             <!-- Radius/Distance -->
                             <div class="space-y-2">
-                                <label class="text-sm font-medium">Radius Search (km)</label>
+                                <label class="text-sm font-medium"
+                                    >Radius Search (km)</label
+                                >
                                 <div class="space-y-2">
                                     <Input
                                         v-model="radius"
@@ -918,11 +1064,18 @@ onMounted(async () => {
             </Card>
 
             <!-- Bulk Actions -->
-            <div v-if="selectedRows.size > 0" class="flex items-center gap-2 p-4 bg-blue-50 dark:bg-blue-950 rounded-lg">
+            <div
+                v-if="selectedRows.size > 0"
+                class="flex items-center gap-2 rounded-lg bg-blue-50 p-4 dark:bg-blue-950"
+            >
                 <span class="text-sm font-medium">
-                    {{ selectedRows.size }} {{ selectedRows.size === 1 ? 'submission' : 'submissions' }} selected
+                    {{ selectedRows.size }}
+                    {{
+                        selectedRows.size === 1 ? 'submission' : 'submissions'
+                    }}
+                    selected
                 </span>
-                <div class="flex gap-2 ml-auto">
+                <div class="ml-auto flex gap-2">
                     <Button variant="outline" size="sm" @click="bulkMarkAsRead">
                         Mark as Read
                     </Button>
@@ -934,7 +1087,11 @@ onMounted(async () => {
                         <Trash2 class="mr-2 h-4 w-4" />
                         Delete
                     </Button>
-                    <Button variant="ghost" size="sm" @click="selectedRows.clear()">
+                    <Button
+                        variant="ghost"
+                        size="sm"
+                        @click="selectedRows.clear()"
+                    >
                         Clear Selection
                     </Button>
                 </div>
@@ -943,127 +1100,239 @@ onMounted(async () => {
             <!-- Submissions Table -->
             <Card>
                 <CardContent class="p-0">
-                    <div v-if="!submissions.data || submissions.data.length === 0" class="text-center py-12">
+                    <div
+                        v-if="
+                            !submissions.data || submissions.data.length === 0
+                        "
+                        class="py-12 text-center"
+                    >
                         <FileText class="mx-auto h-12 w-12 text-gray-400" />
-                        <h3 class="mt-4 text-lg font-medium text-gray-900">No submissions found</h3>
-                        <p class="mt-2 text-gray-500">No submissions match your current filters.</p>
+                        <h3 class="mt-4 text-lg font-medium text-gray-900">
+                            No submissions found
+                        </h3>
+                        <p class="mt-2 text-gray-500">
+                            No submissions match your current filters.
+                        </p>
                     </div>
 
                     <Table v-else>
                         <TableHeader>
                             <TableRow>
-                                <TableHead v-if="visibleColumns.has('checkbox')" class="w-12">
-                                    <Checkbox 
+                                <TableHead
+                                    v-if="visibleColumns.has('checkbox')"
+                                    class="w-12"
+                                >
+                                    <Checkbox
                                         :checked="allRowsSelected"
                                         @update:checked="toggleAllRows"
                                     />
                                 </TableHead>
-                                <TableHead v-if="visibleColumns.has('status')" class="w-12">Status</TableHead>
-                                <TableHead v-if="visibleColumns.has('id')" class="w-16">ID</TableHead>
+                                <TableHead
+                                    v-if="visibleColumns.has('status')"
+                                    class="w-12"
+                                    >Status</TableHead
+                                >
+                                <TableHead
+                                    v-if="visibleColumns.has('id')"
+                                    class="w-16"
+                                    >ID</TableHead
+                                >
                                 <!-- Dynamic field columns -->
-                                <TableHead 
-                                    v-for="field in visibleFieldList" 
+                                <TableHead
+                                    v-for="field in visibleFieldList"
                                     :key="`header-${field.key}`"
-                                    :class="field.type === 'object' ? 'hidden lg:table-cell' : ''"
+                                    :class="
+                                        field.type === 'object'
+                                            ? 'hidden lg:table-cell'
+                                            : ''
+                                    "
                                 >
                                     {{ field.label }}
                                 </TableHead>
-                                <TableHead v-if="visibleColumns.has('date')" class="w-32">Date</TableHead>
-                                <TableHead v-if="visibleColumns.has('actions')" class="w-48 text-right">Actions</TableHead>
+                                <TableHead
+                                    v-if="visibleColumns.has('date')"
+                                    class="w-32"
+                                    >Date</TableHead
+                                >
+                                <TableHead
+                                    v-if="visibleColumns.has('actions')"
+                                    class="w-48 text-right"
+                                    >Actions</TableHead
+                                >
                             </TableRow>
                         </TableHeader>
                         <TableBody>
-                            <TableRow 
-                                v-for="submission in submissions.data || []" 
+                            <TableRow
+                                v-for="submission in submissions.data || []"
                                 :key="submission.id"
                                 :class="[
                                     'transition-colors hover:bg-gray-50/50',
-                                    !isReadByCurrentUser(submission) ? 'bg-blue-50/30 border-l-4 border-l-blue-500' : '',
-                                    editingRow === submission.id ? 'bg-yellow-50/50' : ''
+                                    !isReadByCurrentUser(submission)
+                                        ? 'border-l-4 border-l-blue-500 bg-blue-50/30'
+                                        : '',
+                                    editingRow === submission.id
+                                        ? 'bg-yellow-50/50'
+                                        : '',
                                 ]"
                             >
                                 <!-- Checkbox -->
-                                <TableCell v-if="visibleColumns.has('checkbox')">
-                                    <Checkbox 
-                                        :checked="selectedRows.has(submission.id)"
-                                        @update:checked="() => {
-                                            console.log('Row checkbox clicked:', submission.id);
-                                            toggleRowSelection(submission.id);
-                                        }"
+                                <TableCell
+                                    v-if="visibleColumns.has('checkbox')"
+                                >
+                                    <Checkbox
+                                        :checked="
+                                            selectedRows.has(submission.id)
+                                        "
+                                        @update:checked="
+                                            () => {
+                                                console.log(
+                                                    'Row checkbox clicked:',
+                                                    submission.id,
+                                                );
+                                                toggleRowSelection(
+                                                    submission.id,
+                                                );
+                                            }
+                                        "
                                     />
                                 </TableCell>
 
                                 <!-- Status -->
                                 <TableCell v-if="visibleColumns.has('status')">
-                                    <div class="flex items-center justify-center">
-                                        <CheckCircle2 
-                                            v-if="isReadByCurrentUser(submission)" 
-                                            class="h-4 w-4 text-green-600" 
+                                    <div
+                                        class="flex items-center justify-center"
+                                    >
+                                        <CheckCircle2
+                                            v-if="
+                                                isReadByCurrentUser(submission)
+                                            "
+                                            class="h-4 w-4 text-green-600"
                                             title="Read"
                                         />
-                                        <AlertCircle 
-                                            v-else 
-                                            class="h-4 w-4 text-blue-600" 
+                                        <AlertCircle
+                                            v-else
+                                            class="h-4 w-4 text-blue-600"
                                             title="Unread"
                                         />
                                     </div>
                                 </TableCell>
 
                                 <!-- ID -->
-                                <TableCell v-if="visibleColumns.has('id')" class="font-mono text-sm text-gray-500">
+                                <TableCell
+                                    v-if="visibleColumns.has('id')"
+                                    class="font-mono text-sm text-gray-500"
+                                >
                                     #{{ submission.id }}
                                 </TableCell>
 
                                 <!-- Dynamic field columns -->
-                                <TableCell 
-                                    v-for="field in visibleFieldList" 
+                                <TableCell
+                                    v-for="field in visibleFieldList"
                                     :key="`cell-${submission.id}-${field.key}`"
-                                    :class="field.type === 'object' ? 'hidden lg:table-cell' : ''"
+                                    :class="
+                                        field.type === 'object'
+                                            ? 'hidden lg:table-cell'
+                                            : ''
+                                    "
                                 >
-                                    <div v-if="editingRow === submission.id" class="flex items-center gap-2">
-                                        <Input 
+                                    <div
+                                        v-if="editingRow === submission.id"
+                                        class="flex items-center gap-2"
+                                    >
+                                        <Input
                                             v-model="editingData[field.key]"
                                             class="h-8"
                                             :placeholder="field.label"
                                         />
                                     </div>
                                     <div v-else class="text-sm">
-                                        <span v-if="field.type === 'object'" class="font-mono text-xs">
-                                            {{ formatFieldValue(getFieldValue(submission.data, field.key), field.type) }}
+                                        <span
+                                            v-if="field.type === 'object'"
+                                            class="font-mono text-xs"
+                                        >
+                                            {{
+                                                formatFieldValue(
+                                                    getFieldValue(
+                                                        submission.data,
+                                                        field.key,
+                                                    ),
+                                                    field.type,
+                                                )
+                                            }}
                                         </span>
-                                        <span v-else-if="field.type === 'date'" class="text-gray-700">
-                                            {{ formatFieldValue(getFieldValue(submission.data, field.key), field.type) }}
+                                        <span
+                                            v-else-if="field.type === 'date'"
+                                            class="text-gray-700"
+                                        >
+                                            {{
+                                                formatFieldValue(
+                                                    getFieldValue(
+                                                        submission.data,
+                                                        field.key,
+                                                    ),
+                                                    field.type,
+                                                )
+                                            }}
                                         </span>
-                                        <span v-else class="text-gray-700 truncate max-w-xs">
-                                            {{ formatFieldValue(getFieldValue(submission.data, field.key), field.type) }}
+                                        <span
+                                            v-else
+                                            class="max-w-xs truncate text-gray-700"
+                                        >
+                                            {{
+                                                formatFieldValue(
+                                                    getFieldValue(
+                                                        submission.data,
+                                                        field.key,
+                                                    ),
+                                                    field.type,
+                                                )
+                                            }}
                                         </span>
                                     </div>
                                 </TableCell>
 
                                 <!-- Date -->
-                                <TableCell v-if="visibleColumns.has('date')" class="text-sm text-gray-500">
+                                <TableCell
+                                    v-if="visibleColumns.has('date')"
+                                    class="text-sm text-gray-500"
+                                >
                                     <div class="flex flex-col">
-                                        <span>{{ new Date(submission.created_at).toLocaleDateString() }}</span>
-                                        <span class="text-xs">{{ new Date(submission.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) }}</span>
+                                        <span>{{
+                                            new Date(
+                                                submission.created_at,
+                                            ).toLocaleDateString()
+                                        }}</span>
+                                        <span class="text-xs">{{
+                                            new Date(
+                                                submission.created_at,
+                                            ).toLocaleTimeString([], {
+                                                hour: '2-digit',
+                                                minute: '2-digit',
+                                            })
+                                        }}</span>
                                     </div>
                                 </TableCell>
 
                                 <!-- Actions -->
                                 <TableCell v-if="visibleColumns.has('actions')">
-                                    <div class="flex items-center justify-end gap-1">
+                                    <div
+                                        class="flex items-center justify-end gap-1"
+                                    >
                                         <!-- Edit/Save -->
-                                        <template v-if="editingRow === submission.id">
-                                            <Button 
+                                        <template
+                                            v-if="editingRow === submission.id"
+                                        >
+                                            <Button
                                                 @click="saveEditing(submission)"
-                                                variant="ghost" 
+                                                variant="ghost"
                                                 size="sm"
                                                 class="h-8 w-8 p-0 text-green-600"
                                             >
                                                 <Save class="h-4 w-4" />
                                             </Button>
-                                            <Button 
+                                            <Button
                                                 @click="cancelEditing"
-                                                variant="ghost" 
+                                                variant="ghost"
                                                 size="sm"
                                                 class="h-8 w-8 p-0 text-red-600"
                                             >
@@ -1072,16 +1341,24 @@ onMounted(async () => {
                                         </template>
                                         <template v-else>
                                             <!-- View -->
-                                            <Link :href="`${contactShow(submission.id).url}?from=forms&webform_id=${props.webformId}`">
-                                                <Button variant="ghost" size="sm" class="h-8 w-8 p-0">
+                                            <Link
+                                                :href="`${contactShow(submission.id).url}?from=forms&webform_id=${props.webformId}`"
+                                            >
+                                                <Button
+                                                    variant="ghost"
+                                                    size="sm"
+                                                    class="h-8 w-8 p-0"
+                                                >
                                                     <Eye class="h-4 w-4" />
                                                 </Button>
                                             </Link>
 
                                             <!-- Edit -->
-                                            <Button 
-                                                @click="startEditing(submission)"
-                                                variant="ghost" 
+                                            <Button
+                                                @click="
+                                                    startEditing(submission)
+                                                "
+                                                variant="ghost"
                                                 size="sm"
                                                 class="h-8 w-8 p-0"
                                             >
@@ -1089,26 +1366,32 @@ onMounted(async () => {
                                             </Button>
 
                                             <!-- Toggle Read -->
-                                            <Button 
+                                            <Button
                                                 @click="toggleRead(submission)"
-                                                variant="ghost" 
+                                                variant="ghost"
                                                 size="sm"
                                                 class="h-8 w-8 p-0"
                                             >
-                                                <CheckCircle2 
-                                                    v-if="isReadByCurrentUser(submission)" 
-                                                    class="h-4 w-4 text-green-600" 
+                                                <CheckCircle2
+                                                    v-if="
+                                                        isReadByCurrentUser(
+                                                            submission,
+                                                        )
+                                                    "
+                                                    class="h-4 w-4 text-green-600"
                                                 />
-                                                <AlertCircle 
-                                                    v-else 
-                                                    class="h-4 w-4 text-blue-600" 
+                                                <AlertCircle
+                                                    v-else
+                                                    class="h-4 w-4 text-blue-600"
                                                 />
                                             </Button>
 
                                             <!-- Delete -->
-                                            <Button 
-                                                @click="deleteSubmission(submission)"
-                                                variant="ghost" 
+                                            <Button
+                                                @click="
+                                                    deleteSubmission(submission)
+                                                "
+                                                variant="ghost"
                                                 size="sm"
                                                 class="h-8 w-8 p-0 text-red-600 hover:text-red-800"
                                             >
@@ -1124,23 +1407,33 @@ onMounted(async () => {
             </Card>
 
             <!-- Pagination -->
-            <div v-if="submissions.links && submissions.links.length > 3" class="flex items-center justify-center">
+            <div
+                v-if="submissions.links && submissions.links.length > 3"
+                class="flex items-center justify-center"
+            >
                 <nav class="flex items-center space-x-1">
-                    <template v-for="(link, index) in submissions.links" :key="index">
+                    <template
+                        v-for="(link, index) in submissions.links"
+                        :key="index"
+                    >
                         <Link
                             v-if="link.url"
                             :href="link.url"
                             :class="[
-                                'px-3 py-2 text-sm border border-gray-300 hover:bg-gray-50 rounded',
-                                link.active ? 'bg-blue-50 border-blue-500 text-blue-600' : 'text-gray-700'
+                                'rounded border border-gray-300 px-3 py-2 text-sm hover:bg-gray-50',
+                                link.active
+                                    ? 'border-blue-500 bg-blue-50 text-blue-600'
+                                    : 'text-gray-700',
                             ]"
                             v-html="link.label"
                         />
                         <span
                             v-else
                             :class="[
-                                'px-3 py-2 text-sm border border-gray-300 rounded',
-                                link.active ? 'bg-blue-50 border-blue-500 text-blue-600' : 'text-gray-400 bg-gray-100'
+                                'rounded border border-gray-300 px-3 py-2 text-sm',
+                                link.active
+                                    ? 'border-blue-500 bg-blue-50 text-blue-600'
+                                    : 'bg-gray-100 text-gray-400',
                             ]"
                             v-html="link.label"
                         />
@@ -1150,4 +1443,3 @@ onMounted(async () => {
         </div>
     </AppLayout>
 </template>
-

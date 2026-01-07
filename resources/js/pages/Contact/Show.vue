@@ -1,34 +1,43 @@
 <script setup lang="ts">
-import AppLayout from '@/layouts/AppLayout.vue';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import {
+    Card,
+    CardContent,
+    CardDescription,
+    CardHeader,
+    CardTitle,
+} from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
-import { Head, Link, router, usePage } from '@inertiajs/vue3';
-import { index as contactIndex, toggleRead as contactToggleRead, destroy as contactDestroy } from '@/routes/contact';
-import { computed as vueComputed } from 'vue';
-import { 
-    ArrowLeft, 
-    Eye, 
-    EyeOff, 
-    Trash2, 
-    Mail, 
-    Calendar, 
-    User, 
-    MessageSquare,
-    Clock,
-    CheckCircle2,
-    AlertCircle,
-    MapPin,
-    Globe,
-    Settings,
-    Columns
-} from 'lucide-vue-next';
-import { Checkbox } from '@/components/ui/checkbox';
-import { computed, ref, onMounted } from 'vue';
 import { useFieldPreferences } from '@/composables/useFieldPreferences';
-import { groupFieldsByCategory, formatFieldValue } from '@/utils/fieldDetection';
+import AppLayout from '@/layouts/AppLayout.vue';
+import { postJson } from '@/lib/api';
+import {
+    destroy as contactDestroy,
+    index as contactIndex,
+    toggleRead as contactToggleRead,
+} from '@/routes/contact';
+import {
+    formatFieldValue,
+    groupFieldsByCategory,
+} from '@/utils/fieldDetection';
+import { Head, Link, router, usePage } from '@inertiajs/vue3';
+import {
+    AlertCircle,
+    ArrowLeft,
+    Calendar,
+    CheckCircle2,
+    Clock,
+    Columns,
+    Eye,
+    EyeOff,
+    Globe,
+    Mail,
+    MessageSquare,
+    Trash2,
+} from 'lucide-vue-next';
+import { computed, onMounted, ref } from 'vue';
 
 interface ContactSubmission {
     id: number;
@@ -95,15 +104,23 @@ const backButtonText = computed(() => {
     return 'Back to Messages';
 });
 
+// Reactive reads list (so toggles can update UI without a full page reload)
+const reads = ref(props.submission.reads_with_users || []);
+
 // Check if current user has read the submission
 const isReadByCurrentUser = computed((): boolean => {
-    return props.submission.reads_with_users.some(read => read.user_id === authUser.value?.id);
+    return reads.value.some((read) => read.user_id === authUser.value?.id);
 });
 
 // Get initials for avatar - handles missing name gracefully
 const getInitials = (name: string | undefined): string => {
     if (!name || typeof name !== 'string') return '??';
-    return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
+    return name
+        .split(' ')
+        .map((n) => n[0])
+        .join('')
+        .toUpperCase()
+        .slice(0, 2);
 };
 
 // Get display name - handles multiple name field variations
@@ -116,13 +133,15 @@ const getDisplayName = (data: any): string => {
         return `${data.first_name} ${data.last_name}`;
     }
     // Try single name fields
-    return data?.name 
-        || data?.fname 
-        || data?.first_name 
-        || data?.full_name 
-        || data?.contact_name 
-        || data?.email 
-        || 'Unknown';
+    return (
+        data?.name ||
+        data?.fname ||
+        data?.first_name ||
+        data?.full_name ||
+        data?.contact_name ||
+        data?.email ||
+        'Unknown'
+    );
 };
 
 // Get display email - tries email fields
@@ -133,23 +152,25 @@ const getDisplayEmail = (data: any): string | null => {
 // Get message text - handles multiple message field variations
 const getMessageText = (data: any): string => {
     // Prefer message_long, then message_short, then other fields
-    return data?.message_long 
-        || data?.message_short 
-        || data?.description 
-        || data?.message 
-        || data?.content 
-        || data?.text 
-        || 'No message content available';
+    return (
+        data?.message_long ||
+        data?.message_short ||
+        data?.description ||
+        data?.message ||
+        data?.content ||
+        data?.text ||
+        'No message content available'
+    );
 };
 
 // Get category badge variant
 const getCategoryBadgeVariant = (category: string) => {
     const variants: Record<string, string> = {
-        'bigfm': 'default',
-        'rpr1': 'secondary',
-        'regenbogen': 'outline',
-        'rockfm': 'destructive',
-        'bigkarriere': 'default'
+        bigfm: 'default',
+        rpr1: 'secondary',
+        regenbogen: 'outline',
+        rockfm: 'destructive',
+        bigkarriere: 'default',
     };
     return variants[category] || 'default';
 };
@@ -157,37 +178,61 @@ const getCategoryBadgeVariant = (category: string) => {
 // Get category name
 const getCategoryName = (category: string): string => {
     const names: Record<string, string> = {
-        'bigfm': 'BigFM',
-        'rpr1': 'RPR1',
-        'regenbogen': 'Regenbogen',
-        'rockfm': 'RockFM',
-        'bigkarriere': 'BigKarriere'
+        bigfm: 'BigFM',
+        rpr1: 'RPR1',
+        regenbogen: 'Regenbogen',
+        rockfm: 'RockFM',
+        bigkarriere: 'BigKarriere',
     };
     return names[category] || category;
 };
 
-// Toggle read status
-const toggleRead = () => {
-    router.post(contactToggleRead(props.submission.id).url, {}, {
-        preserveScroll: true
-    });
+// Toggle read status via AJAX and update local reads list
+const toggleRead = async () => {
+    try {
+        const url = contactToggleRead(props.submission.id).url;
+        const data = await postJson(url);
+
+        if (data && data.reads) {
+            reads.value = data.reads;
+        }
+    } catch (error) {
+        console.error('Error toggling read status:', error);
+    }
 };
 
 // Delete submission
 const deleteSubmission = () => {
-    if (confirm('Are you sure you want to permanently delete this contact submission?')) {
+    if (
+        confirm(
+            'Are you sure you want to permanently delete this contact submission?',
+        )
+    ) {
         router.delete(contactDestroy(props.submission.id).url);
     }
 };
 
 // Format additional data for display (excludes common fields we show separately)
 const formatAdditionalData = computed(() => {
-    const excludedFields = ['name', 'email', 'description', 'message', 'content', 'text', 'full_name', 'contact_name', 'email_address', 'category'];
-    return Object.entries(props.submission.data)
-        .filter(([key, value]) => 
+    const excludedFields = [
+        'name',
+        'email',
+        'description',
+        'message',
+        'content',
+        'text',
+        'full_name',
+        'contact_name',
+        'email_address',
+        'category',
+    ];
+    return Object.entries(props.submission.data).filter(
+        ([key, value]) =>
             !excludedFields.includes(key.toLowerCase()) &&
-            value !== null && value !== undefined && value !== ''
-        );
+            value !== null &&
+            value !== undefined &&
+            value !== '',
+    );
 });
 
 // Build category path for preferences
@@ -211,7 +256,11 @@ const {
     getFieldLabel,
     toggleField,
     setAllFields,
-} = useFieldPreferences('detail', categoryPath.value, props.smartDefaults || []);
+} = useFieldPreferences(
+    'detail',
+    categoryPath.value,
+    props.smartDefaults || [],
+);
 
 // Available fields from backend - PRIMARY: Form-specific fields only
 const allAvailableFields = computed(() => {
@@ -219,12 +268,12 @@ const allAvailableFields = computed(() => {
     if (props.availableFields && props.availableFields.length > 0) {
         return props.availableFields;
     }
-    
+
     // FALLBACK: If no form-specific fields, use type-level
     if (props.typeFields && props.typeFields.length > 0) {
         return props.typeFields;
     }
-    
+
     // FALLBACK: Use station-level fields
     return props.stationFields || [];
 });
@@ -237,12 +286,15 @@ const isNewField = (fieldKey: string): boolean => {
 // Clear new fields notification
 const clearNewFields = async () => {
     if (!props.submission.webform_id) return;
-    
+
     try {
         await fetch(`/forms/${props.submission.webform_id}/clear-new-fields`, {
             method: 'POST',
             headers: {
-                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '',
+                'X-CSRF-TOKEN':
+                    document
+                        .querySelector('meta[name="csrf-token"]')
+                        ?.getAttribute('content') || '',
             },
         });
     } catch (error) {
@@ -250,20 +302,22 @@ const clearNewFields = async () => {
     }
 };
 
-const groupedFields = computed(() => groupFieldsByCategory(allAvailableFields.value));
+const groupedFields = computed(() =>
+    groupFieldsByCategory(allAvailableFields.value),
+);
 
 // Get visible data fields based on preferences
 const visibleDataFields = computed(() => {
     if (visibleFields.value.size === 0) {
         // Default: show essential fields
-        return Object.entries(props.submission.data).filter(([key]) => 
-            ['fname', 'lname', 'email', 'message_long'].includes(key)
+        return Object.entries(props.submission.data).filter(([key]) =>
+            ['fname', 'lname', 'email', 'message_long'].includes(key),
         );
     }
-    
-    return Object.entries(props.submission.data).filter(([key]) => 
-        visibleFields.value.has(key)
-        );
+
+    return Object.entries(props.submission.data).filter(([key]) =>
+        visibleFields.value.has(key),
+    );
 });
 
 // Get all data fields (for display purposes)
@@ -281,22 +335,22 @@ const saveLayoutPreferences = async (): Promise<boolean> => {
     savingLayout.value = true;
     try {
         const currentFields = Array.from(visibleFields.value);
-        
+
         // Only save fields that exist in availableFields (prevent saving non-existent fields)
-        const validFields = currentFields.filter(fieldKey => 
-            allAvailableFields.value.some(f => f.key === fieldKey)
+        const validFields = currentFields.filter((fieldKey) =>
+            allAvailableFields.value.some((f) => f.key === fieldKey),
         );
-        
+
         if (validFields.length === 0) {
             console.warn('⚠️ No valid fields to save - skipping');
             return false;
         }
-        
+
         const result = await savePreferences(validFields, {
             preferenceName: 'detail-view-layout',
             asDefault: true, // Save as default preference
         });
-        
+
         return result;
     } catch (error) {
         console.error('Error saving layout preferences:', error);
@@ -319,7 +373,7 @@ onMounted(() => {
             <div class="mx-auto max-w-4xl px-4 sm:px-6 lg:px-8">
                 <!-- Header -->
                 <div class="mb-8">
-                    <div class="flex items-center gap-4 mb-4">
+                    <div class="mb-4 flex items-center gap-4">
                         <Link :href="backUrl">
                             <Button variant="outline" size="sm">
                                 <ArrowLeft class="mr-2 h-4 w-4" />
@@ -330,46 +384,80 @@ onMounted(() => {
 
                     <div class="flex items-start justify-between">
                         <div class="flex-1">
-                            <div class="flex items-center gap-3 mb-2">
+                            <div class="mb-2 flex items-center gap-3">
                                 <!-- Read/Unread Indicator -->
-                                <div v-if="isReadByCurrentUser" class="flex items-center text-green-600">
+                                <div
+                                    v-if="isReadByCurrentUser"
+                                    class="flex items-center text-green-600"
+                                >
                                     <CheckCircle2 class="h-5 w-5" />
-                                    <span class="text-sm ml-1 font-medium">Read</span>
+                                    <span class="ml-1 text-sm font-medium"
+                                        >Read</span
+                                    >
                                 </div>
-                                <div v-else class="flex items-center text-blue-600">
+                                <div
+                                    v-else
+                                    class="flex items-center text-blue-600"
+                                >
                                     <AlertCircle class="h-5 w-5" />
-                                    <span class="text-sm ml-1 font-medium">Unread</span>
+                                    <span class="ml-1 text-sm font-medium"
+                                        >Unread</span
+                                    >
                                 </div>
 
                                 <!-- Category Badge -->
-                                <Badge :variant="getCategoryBadgeVariant(submission.category)" class="text-sm">
+                                <Badge
+                                    :variant="
+                                        getCategoryBadgeVariant(
+                                            submission.category,
+                                        )
+                                    "
+                                    class="text-sm"
+                                >
                                     {{ getCategoryName(submission.category) }}
                                 </Badge>
                             </div>
 
                             <h1 class="text-3xl font-bold text-gray-900">
-                                Message from {{ getDisplayName(submission.data) }}
+                                Message from
+                                {{ getDisplayName(submission.data) }}
                             </h1>
                             <p class="mt-2 text-gray-600">
-                                Submitted {{ new Date(submission.created_at).toLocaleString() }}
+                                Submitted
+                                {{
+                                    new Date(
+                                        submission.created_at,
+                                    ).toLocaleString()
+                                }}
                             </p>
                         </div>
 
                         <!-- Action Buttons -->
                         <div class="flex gap-2">
                             <!-- Toggle Read Button -->
-                            <Button 
+                            <Button
                                 @click="toggleRead"
                                 variant="outline"
-                                :class="isReadByCurrentUser ? 'text-gray-600' : 'text-blue-600'"
+                                :class="
+                                    isReadByCurrentUser
+                                        ? 'text-gray-600'
+                                        : 'text-blue-600'
+                                "
                             >
-                                <EyeOff v-if="isReadByCurrentUser" class="mr-2 h-4 w-4" />
+                                <EyeOff
+                                    v-if="isReadByCurrentUser"
+                                    class="mr-2 h-4 w-4"
+                                />
                                 <Eye v-else class="mr-2 h-4 w-4" />
-                                {{ isReadByCurrentUser ? 'Mark Unread' : 'Mark Read' }}
+                                {{
+                                    isReadByCurrentUser
+                                        ? 'Mark Unread'
+                                        : 'Mark Read'
+                                }}
                             </Button>
 
                             <!-- Delete Button -->
-                            <Button 
+                            <Button
                                 @click="deleteSubmission"
                                 variant="destructive"
                             >
@@ -387,87 +475,146 @@ onMounted(() => {
                             <CardTitle class="flex items-center gap-2">
                                 <Columns class="h-5 w-5" />
                                 Show/Hide Fields
-                                <Badge v-if="newFields && newFields.length > 0" variant="secondary" class="ml-2">
+                                <Badge
+                                    v-if="newFields && newFields.length > 0"
+                                    variant="secondary"
+                                    class="ml-2"
+                                >
                                     {{ newFields.length }} new
                                 </Badge>
                             </CardTitle>
                             <div class="flex gap-2">
-                                <Button variant="ghost" size="sm" @click="async () => { 
-                                    const newSet = new Set(visibleFields);
-                                    allAvailableFields.forEach((f: FieldInfo) => {
-                                        newSet.add(f.key);
-                                    });
-                                    visibleFields = newSet;
-                                    await saveLayoutPreferences();
-                                }" class="h-8 text-xs">
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    @click="
+                                        async () => {
+                                            const newSet = new Set(
+                                                visibleFields,
+                                            );
+                                            allAvailableFields.forEach(
+                                                (f: FieldInfo) => {
+                                                    newSet.add(f.key);
+                                                },
+                                            );
+                                            visibleFields = newSet;
+                                            await saveLayoutPreferences();
+                                        }
+                                    "
+                                    class="h-8 text-xs"
+                                >
                                     Select All
                                 </Button>
-                                <Button variant="ghost" size="sm" @click="async () => {
-                                    visibleFields = new Set();
-                                    await saveLayoutPreferences();
-                                }" class="h-8 text-xs">
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    @click="
+                                        async () => {
+                                            visibleFields = new Set();
+                                            await saveLayoutPreferences();
+                                        }
+                                    "
+                                    class="h-8 text-xs"
+                                >
                                     Clear All
                                 </Button>
                             </div>
                         </div>
                     </CardHeader>
                     <CardContent>
-                        <div v-if="newFields && newFields.length > 0" class="mb-4 p-3 bg-blue-50 dark:bg-blue-950 rounded-lg text-sm">
+                        <div
+                            v-if="newFields && newFields.length > 0"
+                            class="mb-4 rounded-lg bg-blue-50 p-3 text-sm dark:bg-blue-950"
+                        >
                             <div class="flex items-center justify-between">
-                                <span class="text-blue-700 dark:text-blue-300 font-medium">
-                                    🎉 {{ newFields.length }} new {{ newFields.length === 1 ? 'field' : 'fields' }} detected!
+                                <span
+                                    class="font-medium text-blue-700 dark:text-blue-300"
+                                >
+                                    🎉 {{ newFields.length }} new
+                                    {{
+                                        newFields.length === 1
+                                            ? 'field'
+                                            : 'fields'
+                                    }}
+                                    detected!
                                 </span>
-                                <Button variant="ghost" size="sm" @click="clearNewFields" class="h-7 text-xs">
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    @click="clearNewFields"
+                                    class="h-7 text-xs"
+                                >
                                     Dismiss
                                 </Button>
                             </div>
                         </div>
                         <div class="flex flex-wrap gap-4">
-                            <label 
-                                v-for="field in allAvailableFields" 
+                            <label
+                                v-for="field in allAvailableFields"
                                 :key="field.key"
-                                class="flex items-center gap-2 cursor-pointer hover:bg-muted p-2 rounded transition-colors"
+                                class="flex cursor-pointer items-center gap-2 rounded p-2 transition-colors hover:bg-muted"
                             >
                                 <input
                                     type="checkbox"
                                     :checked="visibleFields.has(field.key)"
-                                    @change="async () => {
-                                        const newSet = new Set(visibleFields);
-                                        if (newSet.has(field.key)) {
-                                            newSet.delete(field.key);
-                                        } else {
-                                            newSet.add(field.key);
+                                    @change="
+                                        async () => {
+                                            const newSet = new Set(
+                                                visibleFields,
+                                            );
+                                            if (newSet.has(field.key)) {
+                                                newSet.delete(field.key);
+                                            } else {
+                                                newSet.add(field.key);
+                                            }
+                                            visibleFields = newSet;
+                                            await saveLayoutPreferences();
                                         }
-                                        visibleFields = newSet;
-                                        await saveLayoutPreferences();
-                                    }"
-                                    class="w-4 h-4 text-primary border-gray-300 rounded focus:ring-primary"
+                                    "
+                                    class="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
                                 />
-                                <span class="text-sm font-medium select-none">{{ field.label }}</span>
-                                <Badge 
-                                    v-if="isNewField(field.key)" 
-                                    variant="secondary" 
-                                    class="ml-1 text-xs bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300"
+                                <span class="text-sm font-medium select-none">{{
+                                    field.label
+                                }}</span>
+                                <Badge
+                                    v-if="isNewField(field.key)"
+                                    variant="secondary"
+                                    class="ml-1 bg-blue-100 text-xs text-blue-700 dark:bg-blue-900 dark:text-blue-300"
                                 >
                                     New
                                 </Badge>
                             </label>
                         </div>
-                        <div class="mt-3 text-xs text-muted-foreground border-t pt-3">
+                        <div
+                            class="mt-3 border-t pt-3 text-xs text-muted-foreground"
+                        >
                             <div class="flex items-center gap-2">
-                                <span v-if="savingLayout" class="text-blue-600 animate-pulse">Saving...</span>
-                                <span v-else-if="visibleFields.size > 0" class="text-green-600">✓ Saved</span>
+                                <span
+                                    v-if="savingLayout"
+                                    class="animate-pulse text-blue-600"
+                                    >Saving...</span
+                                >
+                                <span
+                                    v-else-if="visibleFields.size > 0"
+                                    class="text-green-600"
+                                    >✓ Saved</span
+                                >
                             </div>
                             <div class="mt-1">
-                                Preference level: <strong>Type</strong> (applies to all {{ submission.submission_form || 'forms' }} forms)
+                                Preference level: <strong>Type</strong> (applies
+                                to all
+                                {{
+                                    submission.submission_form || 'forms'
+                                }}
+                                forms)
                             </div>
                         </div>
                     </CardContent>
                 </Card>
 
-                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <div class="grid grid-cols-1 gap-6 lg:grid-cols-3">
                     <!-- Main Content -->
-                    <div class="lg:col-span-2 space-y-6">
+                    <div class="space-y-6 lg:col-span-2">
                         <!-- Message Content -->
                         <Card>
                             <CardHeader>
@@ -478,48 +625,91 @@ onMounted(() => {
                             </CardHeader>
                             <CardContent>
                                 <div class="prose prose-gray max-w-none">
-                                    <p class="text-gray-900 leading-relaxed whitespace-pre-wrap">{{ getMessageText(submission.data) }}</p>
+                                    <p
+                                        class="leading-relaxed whitespace-pre-wrap text-gray-900"
+                                    >
+                                        {{ getMessageText(submission.data) }}
+                                    </p>
                                 </div>
                             </CardContent>
                         </Card>
 
                         <!-- Form Data (Customizable) -->
-                        <Card v-if="visibleDataFields.length > 0 || showAdvancedView">
+                        <Card
+                            v-if="
+                                visibleDataFields.length > 0 || showAdvancedView
+                            "
+                        >
                             <CardHeader>
                                 <div class="flex items-center justify-between">
                                     <div>
-                                <CardTitle>Form Data</CardTitle>
-                                <CardDescription>
-                                            {{ visibleFields.size > 0 ? 'Selected fields' : 'Essential fields' }}
-                                </CardDescription>
+                                        <CardTitle>Form Data</CardTitle>
+                                        <CardDescription>
+                                            {{
+                                                visibleFields.size > 0
+                                                    ? 'Selected fields'
+                                                    : 'Essential fields'
+                                            }}
+                                        </CardDescription>
                                     </div>
-                                    <Button 
-                                        variant="ghost" 
+                                    <Button
+                                        variant="ghost"
                                         size="sm"
-                                        @click="showAdvancedView = !showAdvancedView"
+                                        @click="
+                                            showAdvancedView = !showAdvancedView
+                                        "
                                     >
-                                        {{ showAdvancedView ? 'Hide' : 'Show' }} All Fields
+                                        {{
+                                            showAdvancedView ? 'Hide' : 'Show'
+                                        }}
+                                        All Fields
                                     </Button>
                                 </div>
                             </CardHeader>
                             <CardContent>
                                 <div class="space-y-3">
-                                    <div 
-                                        v-for="[key, value] in (showAdvancedView ? allDataFields : visibleDataFields)" 
+                                    <div
+                                        v-for="[key, value] in showAdvancedView
+                                            ? allDataFields
+                                            : visibleDataFields"
                                         :key="key"
-                                        class="flex justify-between items-start py-2 border-b border-gray-100 last:border-b-0"
+                                        class="flex items-start justify-between border-b border-gray-100 py-2 last:border-b-0"
                                     >
                                         <div class="font-medium text-gray-700">
                                             {{ getFieldLabel(key) }}:
                                         </div>
-                                        <div class="text-gray-900 text-right max-w-xs break-words">
-                                            <span v-if="typeof value === 'object' && value !== null">
-                                                <pre class="text-xs bg-gray-50 p-2 rounded">{{ JSON.stringify(value, null, 2) }}</pre>
+                                        <div
+                                            class="max-w-xs text-right break-words text-gray-900"
+                                        >
+                                            <span
+                                                v-if="
+                                                    typeof value === 'object' &&
+                                                    value !== null
+                                                "
+                                            >
+                                                <pre
+                                                    class="rounded bg-gray-50 p-2 text-xs"
+                                                    >{{
+                                                        JSON.stringify(
+                                                            value,
+                                                            null,
+                                                            2,
+                                                        )
+                                                    }}</pre
+                                                >
                                             </span>
-                                            <span v-else-if="value === null || value === undefined" class="text-gray-400 italic">
+                                            <span
+                                                v-else-if="
+                                                    value === null ||
+                                                    value === undefined
+                                                "
+                                                class="text-gray-400 italic"
+                                            >
                                                 (empty)
                                             </span>
-                                            <span v-else class="break-all">{{ formatFieldValue(value) }}</span>
+                                            <span v-else class="break-all">{{
+                                                formatFieldValue(value)
+                                            }}</span>
                                         </div>
                                     </div>
                                 </div>
@@ -529,13 +719,20 @@ onMounted(() => {
                         <!-- Raw Data (for debugging) - Hidden by default -->
                         <Card v-if="showAdvancedView" class="bg-gray-50">
                             <CardHeader>
-                                <CardTitle class="text-sm">Raw Data (JSON)</CardTitle>
+                                <CardTitle class="text-sm"
+                                    >Raw Data (JSON)</CardTitle
+                                >
                                 <CardDescription>
                                     Complete data payload as received
                                 </CardDescription>
                             </CardHeader>
                             <CardContent>
-                                <pre class="text-xs bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto">{{ JSON.stringify(submission.data, null, 2) }}</pre>
+                                <pre
+                                    class="overflow-x-auto rounded-lg bg-gray-900 p-4 text-xs text-gray-100"
+                                    >{{
+                                        JSON.stringify(submission.data, null, 2)
+                                    }}</pre
+                                >
                             </CardContent>
                         </Card>
                     </div>
@@ -552,12 +749,20 @@ onMounted(() => {
                                 <div class="flex items-center gap-3">
                                     <Avatar class="h-12 w-12">
                                         <AvatarFallback class="text-lg">
-                                            {{ getInitials(getDisplayName(submission.data)) }}
+                                            {{
+                                                getInitials(
+                                                    getDisplayName(
+                                                        submission.data,
+                                                    ),
+                                                )
+                                            }}
                                         </AvatarFallback>
                                     </Avatar>
                                     <div>
                                         <div class="font-medium text-gray-900">
-                                            {{ getDisplayName(submission.data) }}
+                                            {{
+                                                getDisplayName(submission.data)
+                                            }}
                                         </div>
                                     </div>
                                 </div>
@@ -565,22 +770,34 @@ onMounted(() => {
                                 <Separator />
 
                                 <!-- Email -->
-                                <div v-if="getDisplayEmail(submission.data)" class="flex items-center gap-3">
+                                <div
+                                    v-if="getDisplayEmail(submission.data)"
+                                    class="flex items-center gap-3"
+                                >
                                     <Mail class="h-4 w-4 text-gray-400" />
                                     <div class="flex-1">
-                                        <div class="text-sm text-gray-500">Email</div>
-                                        <a 
-                                            :href="`mailto:${getDisplayEmail(submission.data)}`" 
+                                        <div class="text-sm text-gray-500">
+                                            Email
+                                        </div>
+                                        <a
+                                            :href="`mailto:${getDisplayEmail(submission.data)}`"
                                             class="text-blue-600 hover:text-blue-800"
                                         >
-                                            {{ getDisplayEmail(submission.data) }}
+                                            {{
+                                                getDisplayEmail(submission.data)
+                                            }}
                                         </a>
                                     </div>
                                 </div>
-                                <div v-else class="flex items-center gap-3 text-gray-400">
+                                <div
+                                    v-else
+                                    class="flex items-center gap-3 text-gray-400"
+                                >
                                     <Mail class="h-4 w-4" />
                                     <div class="flex-1">
-                                        <div class="text-sm">No email provided</div>
+                                        <div class="text-sm">
+                                            No email provided
+                                        </div>
                                     </div>
                                 </div>
 
@@ -588,8 +805,12 @@ onMounted(() => {
                                 <div class="flex items-center gap-3">
                                     <Globe class="h-4 w-4 text-gray-400" />
                                     <div class="flex-1">
-                                        <div class="text-sm text-gray-500">IP Address</div>
-                                        <div class="font-mono text-sm text-gray-900">
+                                        <div class="text-sm text-gray-500">
+                                            IP Address
+                                        </div>
+                                        <div
+                                            class="font-mono text-sm text-gray-900"
+                                        >
                                             {{ submission.ip_address }}
                                         </div>
                                     </div>
@@ -599,9 +820,15 @@ onMounted(() => {
                                 <div class="flex items-center gap-3">
                                     <Calendar class="h-4 w-4 text-gray-400" />
                                     <div class="flex-1">
-                                        <div class="text-sm text-gray-500">Submitted</div>
+                                        <div class="text-sm text-gray-500">
+                                            Submitted
+                                        </div>
                                         <div class="text-sm text-gray-900">
-                                            {{ new Date(submission.created_at).toLocaleString() }}
+                                            {{
+                                                new Date(
+                                                    submission.created_at,
+                                                ).toLocaleString()
+                                            }}
                                         </div>
                                     </div>
                                 </div>
@@ -617,34 +844,55 @@ onMounted(() => {
                                 </CardTitle>
                             </CardHeader>
                             <CardContent>
-                                <div v-if="submission.reads_with_users.length === 0" class="text-center py-4">
-                                    <AlertCircle class="mx-auto h-8 w-8 text-gray-400 mb-2" />
-                                    <p class="text-sm text-gray-500">Not read by anyone yet</p>
+                                <div
+                                    v-if="reads.length === 0"
+                                    class="py-4 text-center"
+                                >
+                                    <AlertCircle
+                                        class="mx-auto mb-2 h-8 w-8 text-gray-400"
+                                    />
+                                    <p class="text-sm text-gray-500">
+                                        Not read by anyone yet
+                                    </p>
                                 </div>
 
                                 <div v-else class="space-y-3">
-                                    <div class="text-sm text-gray-500 mb-3">
-                                        Read by {{ submission.reads_with_users.length }} 
-                                        {{ submission.reads_with_users.length === 1 ? 'user' : 'users' }}:
+                                    <div class="mb-3 text-sm text-gray-500">
+                                        Read by {{ reads.length }}
+                                        {{
+                                            reads.length === 1
+                                                ? 'user'
+                                                : 'users'
+                                        }}:
                                     </div>
 
-                                    <div 
-                                        v-for="read in submission.reads_with_users" 
+                                    <div
+                                        v-for="read in reads"
                                         :key="read.id"
                                         class="flex items-center gap-3 py-2"
                                     >
                                         <Avatar class="h-8 w-8">
                                             <AvatarFallback>
-                                                {{ getInitials(read.user.name) }}
+                                                {{
+                                                    getInitials(read.user.name)
+                                                }}
                                             </AvatarFallback>
                                         </Avatar>
                                         <div class="flex-1">
-                                            <div class="font-medium text-gray-900">
+                                            <div
+                                                class="font-medium text-gray-900"
+                                            >
                                                 {{ read.user.name }}
                                             </div>
-                                            <div class="text-xs text-gray-500 flex items-center gap-1">
+                                            <div
+                                                class="flex items-center gap-1 text-xs text-gray-500"
+                                            >
                                                 <Clock class="h-3 w-3" />
-                                                {{ new Date(read.read_at).toLocaleString() }}
+                                                {{
+                                                    new Date(
+                                                        read.read_at,
+                                                    ).toLocaleString()
+                                                }}
                                             </div>
                                         </div>
                                     </div>
@@ -659,20 +907,24 @@ onMounted(() => {
                             </CardHeader>
                             <CardContent class="space-y-2">
                                 <!-- Reply via Email -->
-                                <a 
+                                <a
                                     v-if="getDisplayEmail(submission.data)"
                                     :href="`mailto:${getDisplayEmail(submission.data)}?subject=Re: Your contact message&body=Hi ${getDisplayName(submission.data)},%0D%0A%0D%0AThank you for your message. `"
                                     class="w-full"
                                 >
-                                    <Button variant="outline" size="sm" class="w-full justify-start">
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        class="w-full justify-start"
+                                    >
                                         <Mail class="mr-2 h-4 w-4" />
                                         Reply via Email
                                     </Button>
                                 </a>
-                                <Button 
+                                <Button
                                     v-else
-                                    variant="outline" 
-                                    size="sm" 
+                                    variant="outline"
+                                    size="sm"
                                     class="w-full justify-start"
                                     disabled
                                 >
@@ -681,22 +933,33 @@ onMounted(() => {
                                 </Button>
 
                                 <!-- Toggle Read Status -->
-                                <Button 
+                                <Button
                                     @click="toggleRead"
-                                    variant="outline" 
+                                    variant="outline"
                                     size="sm"
                                     class="w-full justify-start"
-                                    :class="isReadByCurrentUser ? 'text-gray-600' : 'text-blue-600'"
+                                    :class="
+                                        isReadByCurrentUser
+                                            ? 'text-gray-600'
+                                            : 'text-blue-600'
+                                    "
                                 >
-                                    <EyeOff v-if="isReadByCurrentUser" class="mr-2 h-4 w-4" />
+                                    <EyeOff
+                                        v-if="isReadByCurrentUser"
+                                        class="mr-2 h-4 w-4"
+                                    />
                                     <Eye v-else class="mr-2 h-4 w-4" />
-                                    {{ isReadByCurrentUser ? 'Mark Unread' : 'Mark Read' }}
+                                    {{
+                                        isReadByCurrentUser
+                                            ? 'Mark Unread'
+                                            : 'Mark Read'
+                                    }}
                                 </Button>
 
                                 <!-- Delete -->
-                                <Button 
+                                <Button
                                     @click="deleteSubmission"
-                                    variant="destructive" 
+                                    variant="destructive"
                                     size="sm"
                                     class="w-full justify-start"
                                 >
