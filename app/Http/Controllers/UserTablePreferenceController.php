@@ -177,16 +177,16 @@ class UserTablePreferenceController extends Controller
 
         // Ensure only ONE preference exists per category/name combination
         // Delete any existing preferences for this category/name (single preference system)
-        UserTablePreference::where('user_id', $userId)
+            UserTablePreference::where('user_id', $userId)
             ->where('category', $category)
             ->where('preference_name', $preferenceName)
             ->delete();
 
         // Create the single preference (always create new to ensure clean state)
-        $preference = UserTablePreference::create([
-            'user_id' => $userId,
-            ...$validated
-        ]);
+            $preference = UserTablePreference::create([
+                'user_id' => $userId,
+                ...$validated
+            ]);
 
         return response()->json([
             'success' => true,

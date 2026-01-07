@@ -263,7 +263,7 @@ const visibleDataFields = computed(() => {
     
     return Object.entries(props.submission.data).filter(([key]) => 
         visibleFields.value.has(key)
-    );
+        );
 });
 
 // Get all data fields (for display purposes)
@@ -274,13 +274,36 @@ const allDataFields = computed(() => {
 // Layout settings
 const showLayoutSettings = ref(false);
 const showAdvancedView = ref(false);
+const savingLayout = ref(false);
 
-// Save layout preferences
-const saveLayoutPreferences = async () => {
-    await savePreferences(Array.from(visibleFields.value), {
-        asDefault: false,
-    });
-    showLayoutSettings.value = false;
+// Save layout preferences (auto-save as default)
+const saveLayoutPreferences = async (): Promise<boolean> => {
+    savingLayout.value = true;
+    try {
+        const currentFields = Array.from(visibleFields.value);
+        
+        // Only save fields that exist in availableFields (prevent saving non-existent fields)
+        const validFields = currentFields.filter(fieldKey => 
+            allAvailableFields.value.some(f => f.key === fieldKey)
+        );
+        
+        if (validFields.length === 0) {
+            console.warn('⚠️ No valid fields to save - skipping');
+            return false;
+        }
+        
+        const result = await savePreferences(validFields, {
+            preferenceName: 'detail-view-layout',
+            asDefault: true, // Save as default preference
+        });
+        
+        return result;
+    } catch (error) {
+        console.error('Error saving layout preferences:', error);
+        return false;
+    } finally {
+        savingLayout.value = false;
+    }
 };
 
 onMounted(() => {
@@ -334,88 +357,6 @@ onMounted(() => {
 
                         <!-- Action Buttons -->
                         <div class="flex gap-2">
-                            <!-- Layout Settings Button -->
-                            <div class="relative">
-                                <Button 
-                                    @click="showLayoutSettings = !showLayoutSettings"
-                                    variant="outline"
-                                >
-                                    <Settings class="mr-2 h-4 w-4" />
-                                    Layout Settings
-                                </Button>
-                                
-                                <!-- Layout Settings Dropdown -->
-                                <div v-if="showLayoutSettings" class="absolute right-0 mt-2 w-96 bg-white dark:bg-gray-800 border rounded-lg shadow-xl z-50 max-h-[500px] overflow-y-auto">
-                                    <div class="p-3 border-b">
-                                        <div class="text-sm font-semibold mb-2 flex items-center justify-between">
-                                            <div class="flex items-center gap-2">
-                                                <Columns class="h-4 w-4" />
-                                                Show/Hide Fields
-                                                <Badge v-if="newFields && newFields.length > 0" variant="secondary" class="ml-2 text-xs">
-                                                    {{ newFields.length }} new
-                                                </Badge>
-                                            </div>
-                                            <div class="flex gap-1">
-                                                <Button variant="ghost" size="sm" @click="setAllFields(allAvailableFields.map(f => f.key), true)" class="h-6 text-xs">
-                                                    All
-                                                </Button>
-                                                <Button variant="ghost" size="sm" @click="setAllFields(allAvailableFields.map(f => f.key), false)" class="h-6 text-xs">
-                                                    None
-                                                </Button>
-                                            </div>
-                                        </div>
-                                        <div v-if="newFields && newFields.length > 0" class="mb-3 p-2 bg-blue-50 dark:bg-blue-950 rounded text-xs">
-                                            <div class="flex items-center justify-between">
-                                                <span class="text-blue-700 dark:text-blue-300">
-                                                    New fields detected! Check them below.
-                                                </span>
-                                                <Button variant="ghost" size="sm" @click="clearNewFields" class="h-5 text-xs">
-                                                    Dismiss
-                                                </Button>
-                                            </div>
-                                        </div>
-                                        <div class="space-y-3 max-h-60 overflow-y-auto">
-                                            <div v-for="(fields, category) in groupedFields" :key="category" class="space-y-1">
-                                                <div class="text-xs font-medium text-muted-foreground uppercase">{{ category }}</div>
-                                                <div class="space-y-1 pl-2">
-                                                    <label 
-                                                        v-for="field in fields" 
-                                                        :key="field.key"
-                                                        class="flex items-center gap-2 p-1 hover:bg-muted rounded cursor-pointer"
-                                                    >
-                                                        <Checkbox 
-                                                            :checked="visibleFields.has(field.key)"
-                                                            @update:checked="() => toggleField(field.key)"
-                                                        />
-                                                        <span class="text-sm">{{ field.label }}</span>
-                                                        <Badge 
-                                                            v-if="isNewField(field.key)" 
-                                                            variant="secondary" 
-                                                            class="ml-auto text-xs bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300"
-                                                        >
-                                                            New
-                                                        </Badge>
-                                                    </label>
-                                                </div>
-                                            </div>
-                                        </div>
-                                        <div class="mt-2 text-xs text-muted-foreground">
-                                            Saving at: <strong>Type level</strong> (applies to all {{ submission.submission_form || 'forms' }} forms)
-                                        </div>
-                                    </div>
-                                    <div class="p-3 bg-muted/30">
-                                        <Button 
-                                            variant="default" 
-                                            size="sm" 
-                                            class="w-full"
-                                            @click="saveLayoutPreferences"
-                                        >
-                                            Save Layout
-                                        </Button>
-                                    </div>
-                                </div>
-                            </div>
-
                             <!-- Toggle Read Button -->
                             <Button 
                                 @click="toggleRead"
@@ -438,6 +379,91 @@ onMounted(() => {
                         </div>
                     </div>
                 </div>
+
+                <!-- Field Visibility Controls - Simple and Clear -->
+                <Card>
+                    <CardHeader>
+                        <div class="flex items-center justify-between">
+                            <CardTitle class="flex items-center gap-2">
+                                <Columns class="h-5 w-5" />
+                                Show/Hide Fields
+                                <Badge v-if="newFields && newFields.length > 0" variant="secondary" class="ml-2">
+                                    {{ newFields.length }} new
+                                </Badge>
+                            </CardTitle>
+                            <div class="flex gap-2">
+                                <Button variant="ghost" size="sm" @click="async () => { 
+                                    const newSet = new Set(visibleFields);
+                                    allAvailableFields.forEach((f: FieldInfo) => {
+                                        newSet.add(f.key);
+                                    });
+                                    visibleFields = newSet;
+                                    await saveLayoutPreferences();
+                                }" class="h-8 text-xs">
+                                    Select All
+                                </Button>
+                                <Button variant="ghost" size="sm" @click="async () => {
+                                    visibleFields = new Set();
+                                    await saveLayoutPreferences();
+                                }" class="h-8 text-xs">
+                                    Clear All
+                                </Button>
+                            </div>
+                        </div>
+                    </CardHeader>
+                    <CardContent>
+                        <div v-if="newFields && newFields.length > 0" class="mb-4 p-3 bg-blue-50 dark:bg-blue-950 rounded-lg text-sm">
+                            <div class="flex items-center justify-between">
+                                <span class="text-blue-700 dark:text-blue-300 font-medium">
+                                    🎉 {{ newFields.length }} new {{ newFields.length === 1 ? 'field' : 'fields' }} detected!
+                                </span>
+                                <Button variant="ghost" size="sm" @click="clearNewFields" class="h-7 text-xs">
+                                    Dismiss
+                                </Button>
+                            </div>
+                        </div>
+                        <div class="flex flex-wrap gap-4">
+                            <label 
+                                v-for="field in allAvailableFields" 
+                                :key="field.key"
+                                class="flex items-center gap-2 cursor-pointer hover:bg-muted p-2 rounded transition-colors"
+                            >
+                                <input
+                                    type="checkbox"
+                                    :checked="visibleFields.has(field.key)"
+                                    @change="async () => {
+                                        const newSet = new Set(visibleFields);
+                                        if (newSet.has(field.key)) {
+                                            newSet.delete(field.key);
+                                        } else {
+                                            newSet.add(field.key);
+                                        }
+                                        visibleFields = newSet;
+                                        await saveLayoutPreferences();
+                                    }"
+                                    class="w-4 h-4 text-primary border-gray-300 rounded focus:ring-primary"
+                                />
+                                <span class="text-sm font-medium select-none">{{ field.label }}</span>
+                                <Badge 
+                                    v-if="isNewField(field.key)" 
+                                    variant="secondary" 
+                                    class="ml-1 text-xs bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300"
+                                >
+                                    New
+                                </Badge>
+                            </label>
+                        </div>
+                        <div class="mt-3 text-xs text-muted-foreground border-t pt-3">
+                            <div class="flex items-center gap-2">
+                                <span v-if="savingLayout" class="text-blue-600 animate-pulse">Saving...</span>
+                                <span v-else-if="visibleFields.size > 0" class="text-green-600">✓ Saved</span>
+                            </div>
+                            <div class="mt-1">
+                                Preference level: <strong>Type</strong> (applies to all {{ submission.submission_form || 'forms' }} forms)
+                            </div>
+                        </div>
+                    </CardContent>
+                </Card>
 
                 <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
                     <!-- Main Content -->
@@ -462,10 +488,10 @@ onMounted(() => {
                             <CardHeader>
                                 <div class="flex items-center justify-between">
                                     <div>
-                                        <CardTitle>Form Data</CardTitle>
-                                        <CardDescription>
+                                <CardTitle>Form Data</CardTitle>
+                                <CardDescription>
                                             {{ visibleFields.size > 0 ? 'Selected fields' : 'Essential fields' }}
-                                        </CardDescription>
+                                </CardDescription>
                                     </div>
                                     <Button 
                                         variant="ghost" 

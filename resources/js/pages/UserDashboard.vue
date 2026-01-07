@@ -147,43 +147,43 @@ const getFormUrl = (webformId: string): string => {
                                 </div>
                                 
                                 <!-- Forms in this type -->
-                                <table class="w-full text-sm">
+                            <table class="w-full text-sm">
                                     <thead class="bg-muted/20">
                                         <tr>
                                             <th class="text-left font-medium px-3 py-1.5 text-xs">Form Name</th>
                                             <th class="text-right font-medium px-3 py-1.5 text-xs w-20">Entries</th>
-                                            <th class="w-8"></th>
-                                        </tr>
-                                    </thead>
-                                    <tbody class="divide-y">
-                                        <tr 
+                                        <th class="w-8"></th>
+                                    </tr>
+                                </thead>
+                                <tbody class="divide-y">
+                                    <tr 
                                             v-for="form in formType.forms" 
-                                            :key="form.webform_id"
-                                            class="hover:bg-muted/50 transition-colors cursor-pointer group"
-                                            @click="$inertia.visit(getFormUrl(form.webform_id))"
-                                        >
-                                            <td class="px-3 py-2">
-                                                <div class="flex items-center gap-2">
-                                                    <FileText class="h-3.5 w-3.5 text-muted-foreground group-hover:text-primary transition-colors flex-shrink-0" />
-                                                    <div class="min-w-0">
-                                                        <div class="font-medium text-xs truncate group-hover:text-primary transition-colors">
-                                                            {{ form.name }}
-                                                        </div>
-                                                        <div class="text-[10px] text-muted-foreground truncate">
-                                                            {{ form.webform_id }}
-                                                        </div>
+                                        :key="form.webform_id"
+                                        class="hover:bg-muted/50 transition-colors cursor-pointer group"
+                                        @click="$inertia.visit(getFormUrl(form.webform_id))"
+                                    >
+                                        <td class="px-3 py-2">
+                                            <div class="flex items-center gap-2">
+                                                <FileText class="h-3.5 w-3.5 text-muted-foreground group-hover:text-primary transition-colors flex-shrink-0" />
+                                                <div class="min-w-0">
+                                                    <div class="font-medium text-xs truncate group-hover:text-primary transition-colors">
+                                                        {{ form.name }}
+                                                    </div>
+                                                    <div class="text-[10px] text-muted-foreground truncate">
+                                                        {{ form.webform_id }}
                                                     </div>
                                                 </div>
-                                            </td>
-                                            <td class="px-3 py-2 text-right">
-                                                <span class="font-semibold text-sm">{{ form.count }}</span>
-                                            </td>
-                                            <td class="px-2 py-2">
-                                                <ArrowRight class="h-3.5 w-3.5 text-muted-foreground group-hover:text-primary group-hover:translate-x-0.5 transition-all" />
-                                            </td>
-                                        </tr>
-                                    </tbody>
-                                </table>
+                                            </div>
+                                        </td>
+                                        <td class="px-3 py-2 text-right">
+                                            <span class="font-semibold text-sm">{{ form.count }}</span>
+                                        </td>
+                                        <td class="px-2 py-2">
+                                            <ArrowRight class="h-3.5 w-3.5 text-muted-foreground group-hover:text-primary group-hover:translate-x-0.5 transition-all" />
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
                             </div>
                         </div>
                     </CardContent>

@@ -237,6 +237,25 @@ const visibleFieldsSet = computed(() => {
     return visibleFields.value || new Set<string>();
 });
 
+// Create a computed getter/setter for each field's checked state
+// This is needed for v-model:checked to work with reka-ui Checkbox
+const getFieldChecked = (fieldKey: string) => {
+    return computed({
+        get: () => visibleFields.value?.has(fieldKey) ?? false,
+        set: (value: boolean | 'indeterminate') => {
+            if (typeof value === 'boolean') {
+                const newSet = new Set(visibleFields.value);
+                if (value) {
+                    newSet.add(fieldKey);
+                } else {
+                    newSet.delete(fieldKey);
+                }
+                visibleFields.value = newSet;
+            }
+        }
+    });
+};
+
 // Check if current user has read the submission
 const isReadByCurrentUser = (submission: ContactSubmission): boolean => {
     return submission.reads_with_users.some(read => read.user_id === authUser.value?.id);
@@ -637,95 +656,82 @@ onMounted(async () => {
                     </div>
                 </div>
                 <div class="flex items-center gap-2">
-                    <!-- View Settings Button -->
-                    <div class="relative">
-                        <Button variant="outline" size="sm" @click="showColumnSettings = !showColumnSettings">
-                            <Settings class="mr-2 h-4 w-4" />
-                            View Settings
-                        </Button>
-                        
-                        <div v-if="showColumnSettings" class="absolute right-0 mt-2 w-96 bg-white dark:bg-gray-800 border rounded-lg shadow-xl z-50 max-h-[600px] overflow-y-auto">
-
-                            <!-- Column Selection -->
-                            <div class="p-3 border-b">
-                                <div class="text-sm font-semibold mb-2 flex items-center justify-between">
-                                    <div class="flex items-center gap-2">
-                                        <Columns class="h-4 w-4" />
-                                        Show/Hide Columns
-                                        <Badge v-if="newFields && newFields.length > 0" variant="secondary" class="ml-2 text-xs">
-                                            {{ newFields.length }} new
-                                        </Badge>
-                                </div>
-                                    <div class="flex gap-1">
-                                        <Button variant="ghost" size="sm" @click="async () => { 
-                                            console.log('All button clicked');
-                                            setAllFields(allAvailableFields.map(f => f.key), true); 
-                                            await saveColumnPreferences(); 
-                                        }" class="h-6 text-xs">
-                                            All
-                                        </Button>
-                                        <Button variant="ghost" size="sm" @click="async () => { 
-                                            console.log('None button clicked');
-                                            setAllFields(allAvailableFields.map(f => f.key), false); 
-                                            await saveColumnPreferences(); 
-                                        }" class="h-6 text-xs">
-                                            None
-                                        </Button>
-                                    </div>
-                                </div>
-                                <div v-if="newFields && newFields.length > 0" class="mb-3 p-2 bg-blue-50 dark:bg-blue-950 rounded text-xs">
-                                    <div class="flex items-center justify-between">
-                                        <span class="text-blue-700 dark:text-blue-300">
-                                            New fields detected! Check them below.
-                                        </span>
-                                        <Button variant="ghost" size="sm" @click="clearNewFields" class="h-5 text-xs">
-                                            Dismiss
-                                        </Button>
-                            </div>
-                                </div>
-                                <div class="space-y-3 max-h-60 overflow-y-auto" :key="`fields-${Array.from(visibleFieldsSet).join('-')}`">
-                                    <div v-for="(fields, category) in groupedFields" :key="category" class="space-y-1">
-                                        <div class="text-xs font-medium text-muted-foreground uppercase">{{ category }}</div>
-                                        <div class="space-y-1 pl-2">
-                                            <label 
-                                                v-for="field in fields" 
-                                                :key="`${field.key}-${visibleFieldsSet.has(field.key) ? 'checked' : 'unchecked'}`"
-                                                class="flex items-center gap-2 p-1 hover:bg-muted rounded cursor-pointer"
-                                            >
-                                    <Checkbox 
-                                                    :checked="visibleFieldsSet.has(field.key)"
-                                                    @click="(e: MouseEvent) => onFieldCheckboxClick(field.key, e)"
-                                    />
-                                                <span class="text-sm">{{ field.label }}</span>
-                                                <Badge 
-                                                    v-if="isNewField(field.key)" 
-                                                    variant="secondary" 
-                                                    class="ml-auto text-xs bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300"
-                                                >
-                                                    New
-                                                </Badge>
-                                </label>
-                            </div>
-                        </div>
-                        </div>
-                                <div class="mt-2 text-xs text-muted-foreground">
-                                    <div class="flex items-center gap-2 mb-1">
-                                        <span v-if="savingPrefs" class="text-blue-600 animate-pulse">Saving...</span>
-                                        <span v-else-if="visibleFields.size > 0" class="text-green-600">✓ Auto-saved</span>
-                    </div>
-                                    <div>
-                                        Saving at: <strong>Type level</strong> (applies to all {{ submissionForm || 'forms' }} forms)
-                </div>
-            </div>
-                            </div>
-                            </div>
-                        </div>
-                    
                     <Badge variant="secondary" class="h-8 px-3">{{ station }}</Badge>
                 </div>
             </div>
 
-            <!-- Removed preset dialog - using single auto-saving preference -->
+            <!-- Column Visibility Controls - Simple and Clear -->
+            <Card>
+                <CardHeader>
+                    <div class="flex items-center justify-between">
+                        <CardTitle class="flex items-center gap-2">
+                            <Columns class="h-5 w-5" />
+                            Show/Hide Columns
+                        </CardTitle>
+                        <div class="flex gap-2">
+                            <Button variant="ghost" size="sm" @click="async () => { 
+                                const newSet = new Set(visibleFields);
+                                allAvailableFields.forEach((f: FieldInfo) => {
+                                    newSet.add(f.key);
+                                });
+                                visibleFields = newSet;
+                                await saveColumnPreferences();
+                            }" class="h-8 text-xs">
+                                Select All
+                            </Button>
+                            <Button variant="ghost" size="sm" @click="async () => {
+                                visibleFields = new Set();
+                                await saveColumnPreferences();
+                            }" class="h-8 text-xs">
+                                Clear All
+                            </Button>
+                        </div>
+                    </div>
+                </CardHeader>
+                <CardContent>
+                    <div class="flex flex-wrap gap-4">
+                        <label 
+                            v-for="field in allAvailableFields" 
+                            :key="field.key"
+                            class="flex items-center gap-2 cursor-pointer hover:bg-muted p-2 rounded transition-colors"
+                        >
+                            <input
+                                type="checkbox"
+                                :checked="visibleFields.has(field.key)"
+                                @change="async () => {
+                                    const newSet = new Set(visibleFields);
+                                    if (newSet.has(field.key)) {
+                                        newSet.delete(field.key);
+                                    } else {
+                                        newSet.add(field.key);
+                                    }
+                                    visibleFields = newSet;
+                                    await saveColumnPreferences();
+                                }"
+                                class="w-4 h-4 text-primary border-gray-300 rounded focus:ring-primary"
+                            />
+                            <span class="text-sm font-medium select-none">{{ field.label }}</span>
+                            <Badge 
+                                v-if="isNewField(field.key)" 
+                                variant="secondary" 
+                                class="ml-1 text-xs bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300"
+                            >
+                                New
+                            </Badge>
+                        </label>
+                    </div>
+                    <div class="mt-3 text-xs text-muted-foreground border-t pt-3">
+                        <div class="flex items-center gap-2">
+                            <span v-if="savingPrefs" class="text-blue-600 animate-pulse">Saving...</span>
+                            <span v-else-if="visibleFields.size > 0" class="text-green-600">✓ Saved</span>
+                        </div>
+                        <div class="mt-1">
+                            Preference level: <strong>Type</strong> (applies to all {{ submissionForm || 'forms' }} forms)
+                        </div>
+                    </div>
+                </CardContent>
+            </Card>
+
 
             <!-- Filters -->
             <Card>
