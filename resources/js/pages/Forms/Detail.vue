@@ -25,6 +25,7 @@ import {
     formatFieldValue,
     groupFieldsByCategory,
 } from '@/utils/fieldDetection';
+import { filterOutTechnicalFields } from '@/utils/technicalFields';
 import { Head, Link, router, usePage } from '@inertiajs/vue3';
 import {
     AlertCircle,
@@ -219,19 +220,24 @@ const sortDirection = ref<'asc' | 'desc'>(
 // Available fields from backend - PRIMARY: Form-specific fields only
 // This ensures we only show fields that exist in THIS form, not union of all forms
 const allAvailableFields = computed(() => {
+    let fields: FieldInfo[] = [];
+
     // PRIORITY: Use form-specific fields (availableFields) as primary source
     // These are fields detected from THIS specific form only
     if (props.availableFields && props.availableFields.length > 0) {
-        return props.availableFields;
+        fields = props.availableFields;
     }
-
     // FALLBACK: If no form-specific fields, use type-level (for new forms)
-    if (props.typeFields && props.typeFields.length > 0) {
-        return props.typeFields;
+    else if (props.typeFields && props.typeFields.length > 0) {
+        fields = props.typeFields;
+    }
+    // FALLBACK: Use station-level fields
+    else {
+        fields = props.stationFields || [];
     }
 
-    // FALLBACK: Use station-level fields
-    return props.stationFields || [];
+    // Filter out internal fields from user UI
+    return filterOutTechnicalFields(fields);
 });
 
 // Check if a field is new (recently detected)
@@ -245,7 +251,7 @@ const groupedFields = computed(() =>
 
 // Computed property for visible fields (ensures reactivity)
 const visibleFieldList = computed(() => {
-    return allAvailableFields.value.filter((f) =>
+    return allAvailableFields.value.filter((f: FieldInfo) =>
         visibleFields.value.has(f.key),
     );
 });
@@ -568,13 +574,13 @@ const saveColumnPreferences = async (): Promise<boolean> => {
 
     // Only save fields that exist in availableFields (prevent saving non-existent fields)
     const validFields = checkedFields.filter((fieldKey) =>
-        allAvailableFields.value.some((f) => f.key === fieldKey),
+        allAvailableFields.value.some((f: FieldInfo) => f.key === fieldKey),
     );
 
     console.log('Valid fields to save:', validFields);
     console.log(
         'All available fields:',
-        allAvailableFields.value.map((f) => f.key),
+        allAvailableFields.value.map((f: FieldInfo) => f.key),
     );
 
     if (validFields.length === 0) {
@@ -695,7 +701,7 @@ onMounted(async () => {
         console.log('No preferences found, using smart defaults');
         const defaults =
             props.smartDefaults ||
-            allAvailableFields.value.slice(0, 4).map((f) => f.key);
+            allAvailableFields.value.slice(0, 4).map((f: FieldInfo) => f.key);
         if (visibleFields.value) {
             visibleFields.value = new Set(defaults);
             console.log('Set defaults:', Array.from(visibleFields.value));
@@ -865,9 +871,7 @@ onMounted(async () => {
                                     showAdvancedFilters = !showAdvancedFilters
                                 "
                             >
-                                {{
-                                    showAdvancedFilters ? 'Hide' : 'Show'
-                                }}
+                                {{ showAdvancedFilters ? 'Hide' : 'Show' }}
                                 Advanced
                                 <ChevronDown
                                     v-if="!showAdvancedFilters"
@@ -1070,9 +1074,7 @@ onMounted(async () => {
             >
                 <span class="text-sm font-medium">
                     {{ selectedRows.size }}
-                    {{
-                        selectedRows.size === 1 ? 'submission' : 'submissions'
-                    }}
+                    {{ selectedRows.size === 1 ? 'submission' : 'submissions' }}
                     selected
                 </span>
                 <div class="ml-auto flex gap-2">

@@ -22,6 +22,10 @@ import {
     formatFieldValue,
     groupFieldsByCategory,
 } from '@/utils/fieldDetection';
+import {
+    filterOutTechnicalFields,
+    isTechnicalFieldKey,
+} from '@/utils/technicalFields';
 import { Head, Link, router, usePage } from '@inertiajs/vue3';
 import {
     AlertCircle,
@@ -264,18 +268,23 @@ const {
 
 // Available fields from backend - PRIMARY: Form-specific fields only
 const allAvailableFields = computed(() => {
+    let fields: FieldInfo[] = [];
+
     // PRIORITY: Use form-specific fields (availableFields) as primary source
     if (props.availableFields && props.availableFields.length > 0) {
-        return props.availableFields;
+        fields = props.availableFields;
     }
-
     // FALLBACK: If no form-specific fields, use type-level
-    if (props.typeFields && props.typeFields.length > 0) {
-        return props.typeFields;
+    else if (props.typeFields && props.typeFields.length > 0) {
+        fields = props.typeFields;
+    }
+    // FALLBACK: Use station-level fields
+    else {
+        fields = props.stationFields || [];
     }
 
-    // FALLBACK: Use station-level fields
-    return props.stationFields || [];
+    // Filter out internal fields from user UI
+    return filterOutTechnicalFields(fields);
 });
 
 // Check if a field is new
@@ -310,19 +319,23 @@ const groupedFields = computed(() =>
 const visibleDataFields = computed(() => {
     if (visibleFields.value.size === 0) {
         // Default: show essential fields
-        return Object.entries(props.submission.data).filter(([key]) =>
-            ['fname', 'lname', 'email', 'message_long'].includes(key),
+        return Object.entries(props.submission.data).filter(
+            ([key]) =>
+                ['fname', 'lname', 'email', 'message_long'].includes(key) &&
+                !isTechnicalFieldKey(key),
         );
     }
 
-    return Object.entries(props.submission.data).filter(([key]) =>
-        visibleFields.value.has(key),
+    return Object.entries(props.submission.data).filter(
+        ([key]) => visibleFields.value.has(key) && !isTechnicalFieldKey(key),
     );
 });
 
-// Get all data fields (for display purposes)
+// Get all data fields
 const allDataFields = computed(() => {
-    return Object.entries(props.submission.data);
+    return Object.entries(props.submission.data).filter(
+        ([key]) => !isTechnicalFieldKey(key),
+    );
 });
 
 // Layout settings
@@ -338,7 +351,7 @@ const saveLayoutPreferences = async (): Promise<boolean> => {
 
         // Only save fields that exist in availableFields (prevent saving non-existent fields)
         const validFields = currentFields.filter((fieldKey) =>
-            allAvailableFields.value.some((f) => f.key === fieldKey),
+            allAvailableFields.value.some((f: FieldInfo) => f.key === fieldKey),
         );
 
         if (validFields.length === 0) {
@@ -603,9 +616,7 @@ onMounted(() => {
                             <div class="mt-1">
                                 Preference level: <strong>Type</strong> (applies
                                 to all
-                                {{
-                                    submission.submission_form || 'forms'
-                                }}
+                                {{ submission.submission_form || 'forms' }}
                                 forms)
                             </div>
                         </div>
@@ -659,9 +670,7 @@ onMounted(() => {
                                             showAdvancedView = !showAdvancedView
                                         "
                                     >
-                                        {{
-                                            showAdvancedView ? 'Hide' : 'Show'
-                                        }}
+                                        {{ showAdvancedView ? 'Hide' : 'Show' }}
                                         All Fields
                                     </Button>
                                 </div>
