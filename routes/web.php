@@ -20,10 +20,14 @@ Route::get('user/dashboard', [App\Http\Controllers\UserDashboardController::clas
     ->middleware(['auth', 'verified', 'role:user'])
     ->name('user.dashboard');
 
+Route::get('user/senders/{station}/forms', [App\Http\Controllers\UserDashboardController::class, 'overview'])
+    ->middleware(['auth', 'verified', 'role:user'])
+    ->name('user.sender.forms.overview');
+
 // Legacy dashboard route (will redirect based on role)
 Route::get('dashboard', function () {
     $user = auth()->user();
-    
+
     if ($user->hasRole('superadmin')) {
         return redirect()->route('superadmin.dashboard');
     } elseif ($user->hasRole('admin')) {
@@ -31,7 +35,7 @@ Route::get('dashboard', function () {
     } elseif ($user->hasRole('user')) {
         return redirect()->route('user.dashboard');
     }
-    
+
     return Inertia::render('Dashboard');
 })->middleware(['auth', 'verified'])->name('dashboard');
 
@@ -55,13 +59,13 @@ Route::post('contact/bigkarriere', [App\Http\Controllers\ContactController::clas
 Route::middleware(['auth', 'verified'])->group(function () {
     // Form detail view - shows submissions for a specific webform_id
     Route::get('forms/{webformId}', [App\Http\Controllers\ContactController::class, 'showFormDetail'])->name('forms.detail');
-    
+
     // Clear new fields notification
     Route::post('forms/{webformId}/clear-new-fields', function (string $webformId) {
         app(App\Http\Controllers\ContactController::class)->clearNewFields($webformId);
         return response()->json(['success' => true]);
     })->name('forms.clear-new-fields');
-    
+
     // User table preferences API
     Route::prefix('api/preferences')->group(function () {
         Route::get('/', [App\Http\Controllers\UserTablePreferenceController::class, 'index'])->name('preferences.index');
@@ -72,12 +76,12 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::delete('{preference}', [App\Http\Controllers\UserTablePreferenceController::class, 'destroy'])->name('preferences.destroy');
         Route::post('{preference}/load', [App\Http\Controllers\UserTablePreferenceController::class, 'load'])->name('preferences.load');
     });
-    
+
     Route::get('contact-messages', [App\Http\Controllers\ContactController::class, 'index'])->name('contact.index');
     Route::get('contact-messages/{submission}', [App\Http\Controllers\ContactController::class, 'show'])->name('contact.show');
     Route::post('contact-messages/{submission}/toggle-read', [App\Http\Controllers\ContactController::class, 'toggleRead'])->name('contact.toggle-read');
     Route::delete('contact-messages/{submission}', [App\Http\Controllers\ContactController::class, 'destroy'])->name('contact.destroy');
 });
 
-require __DIR__.'/settings.php';
-require __DIR__.'/auth.php';
+require __DIR__ . '/settings.php';
+require __DIR__ . '/auth.php';

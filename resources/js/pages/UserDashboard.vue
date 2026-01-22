@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import AppLayout from '@/layouts/AppLayout.vue';
 import { dashboard as userDashboard } from '@/routes/user';
+import userRoutes from '@/routes/user';
 import { type BreadcrumbItem } from '@/types';
 import { Head, Link } from '@inertiajs/vue3';
 import { Badge } from '@/components/ui/badge';
@@ -76,6 +77,10 @@ const getStationBadgeClass = (station: string): string => {
 const getFormUrl = (webformId: string): string => {
     return `/forms/${webformId}`;
 };
+
+const getSenderUrl = (station: string): string => {
+    return userRoutes.sender.forms.overview({ station }).url;
+};
 </script>
 
 <template>
@@ -105,24 +110,29 @@ const getFormUrl = (webformId: string): string => {
             <!-- 2-Column Grid of Station Cards -->
             <div v-else class="grid gap-6 md:grid-cols-2">
                 <!-- Station Card (Outer) -->
-                <Card v-for="station in props.stations" :key="station.station" class="overflow-hidden flex flex-col border-2">
-                    <!-- Station Header with Unique Color -->
-                    <CardHeader :class="getStationHeaderClass(station.station) + ' pb-3'">
-                        <div class="flex items-center justify-between">
-                            <div class="flex items-center gap-2">
-                                <Radio class="h-5 w-5 flex-shrink-0" />
-                                <div>
-                                    <CardTitle class="text-lg font-bold">{{ station.stationName }}</CardTitle>
-                                    <div class="text-xs mt-0.5 opacity-90">
-                                        {{ station.types?.reduce((sum, type) => sum + type.forms.length, 0) || 0 }} forms • {{ station.totalCount }} entries
+                <Card 
+                    v-for="station in props.stations" 
+                    :key="station.station"
+                    class="overflow-hidden flex flex-col border-2 hover:border-primary/50 transition-colors cursor-pointer"
+                    @click="$inertia.visit(getSenderUrl(station.station))"
+                >
+                        <!-- Station Header with Unique Color -->
+                        <CardHeader :class="getStationHeaderClass(station.station) + ' pb-3'">
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center gap-2">
+                                    <Radio class="h-5 w-5 flex-shrink-0" />
+                                    <div>
+                                        <CardTitle class="text-lg font-bold">{{ station.stationName }}</CardTitle>
+                                        <div class="text-xs mt-0.5 opacity-90">
+                                            {{ station.types?.reduce((sum, type) => sum + type.forms.length, 0) || 0 }} forms • {{ station.totalCount }} entries
+                                        </div>
                                     </div>
                                 </div>
+                                <Badge :class="getStationBadgeClass(station.station) + ' text-xs px-2 py-0.5 font-semibold'">
+                                    {{ station.station.toUpperCase() }}
+                                </Badge>
                             </div>
-                            <Badge :class="getStationBadgeClass(station.station) + ' text-xs px-2 py-0.5 font-semibold'">
-                                {{ station.station.toUpperCase() }}
-                            </Badge>
-                        </div>
-                    </CardHeader>
+                        </CardHeader>
 
                     <!-- Forms by Type -->
                     <CardContent class="p-0 flex-1">
@@ -160,7 +170,7 @@ const getFormUrl = (webformId: string): string => {
                                             v-for="form in formType.forms" 
                                         :key="form.webform_id"
                                         class="hover:bg-muted/50 transition-colors cursor-pointer group"
-                                        @click="$inertia.visit(getFormUrl(form.webform_id))"
+                                        @click.stop="$inertia.visit(getFormUrl(form.webform_id))"
                                     >
                                         <td class="px-3 py-2">
                                             <div class="flex items-center gap-2">
