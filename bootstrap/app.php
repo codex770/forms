@@ -21,6 +21,7 @@ return Application::configure(basePath: dirname(__DIR__))
             HandleInertiaRequests::class,
             AddLinkHeadersForPreloadedAssets::class,
             \App\Http\Middleware\CheckUserActive::class,
+            \App\Http\Middleware\SetLocaleFromUser::class,
         ]);
 
         // Replace default CSRF middleware with custom one

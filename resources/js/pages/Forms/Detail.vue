@@ -14,6 +14,7 @@ import {
 } from '@/components/ui/table';
 import { useFieldPreferences } from '@/composables/useFieldPreferences';
 import AppLayout from '@/layouts/AppLayout.vue';
+import { postJson } from '@/lib/api';
 import {
     destroy as contactDestroy,
     show as contactShow,
@@ -26,6 +27,8 @@ import {
     groupFieldsByCategory,
 } from '@/utils/fieldDetection';
 import { filterOutTechnicalFields } from '@/utils/technicalFields';
+import { dedupeFieldsByCanonicalKey, toCanonicalFieldKey } from '@/utils/fieldAliases';
+import { useI18n } from '@/utils/i18n';
 import { Head, Link, router, usePage } from '@inertiajs/vue3';
 import {
     AlertCircle,
@@ -39,13 +42,14 @@ import {
     Eye,
     FileText,
     Filter,
+    Star,
     Save,
     Search,
     Trash2,
     X,
     XCircle,
 } from 'lucide-vue-next';
-import { computed, onMounted, ref } from 'vue';
+import { computed, nextTick, onMounted, ref } from 'vue';
 
 interface ContactSubmission {
     id: number;
@@ -56,7 +60,6 @@ interface ContactSubmission {
         description?: string;
         [key: string]: any;
     };
-    ip_address: string;
     created_at: string;
     updated_at: string;
     reads_with_users: Array<{
@@ -68,6 +71,12 @@ interface ContactSubmission {
             name: string;
         };
     }>;
+    marks?: Array<{
+        id: number;
+        user_id: number;
+        marked_at: string;
+    }>;
+    duplicate_count?: number;
 }
 
 type FieldInfo = {
@@ -102,17 +111,22 @@ interface Props {
         birth_year_min?: string;
         birth_year_max?: string;
         zip_code?: string;
+        plz_from?: string;
+        plz_to?: string;
         city?: string;
         gender?: string;
         radius?: string;
-        radius_lat?: string;
-        radius_lng?: string;
+        radius_plz?: string;
+        hide_duplicates?: boolean;
     };
     sortColumn?: string;
     sortDirection?: string;
+    retentionDays?: number | null;
 }
 
 const props = defineProps<Props>();
+
+const { t } = useI18n();
 
 // New fields from backend
 const newFields = computed(() => props.newFields || []);
@@ -139,11 +153,13 @@ const ageMax = ref(props.filters.age_max || '');
 const birthYearMin = ref(props.filters.birth_year_min || '');
 const birthYearMax = ref(props.filters.birth_year_max || '');
 const zipCode = ref(props.filters.zip_code || '');
+const plzFrom = ref(props.filters.plz_from || '');
+const plzTo = ref(props.filters.plz_to || '');
 const city = ref(props.filters.city || '');
 const gender = ref(props.filters.gender || '');
 const radius = ref(props.filters.radius || '');
-const radiusLat = ref(props.filters.radius_lat || '');
-const radiusLng = ref(props.filters.radius_lng || '');
+const radiusPlz = ref(props.filters.radius_plz || '');
+const hideDuplicates = ref(props.filters.hide_duplicates ?? false);
 const showAdvancedFilters = ref(false);
 const selectedRows = ref<Set<number>>(new Set());
 const editingRow = ref<number | null>(null);
@@ -171,17 +187,21 @@ const formCategoryPath = computed(() => {
 // Field preferences composable - uses TYPE level by default
 // Pass smart defaults from backend for optimal first-time experience
 const {
-    visibleFields,
+    visibleFieldOrder,
+    visibleFieldSet,
     loadPreferences,
     savePreferences,
     getFieldValue,
     getFieldLabel,
     toggleField,
     setAllFields,
+    moveField,
     loading: loadingPrefs,
     saving: savingPrefs,
     // Removed preferences (presets) - using single auto-saving preference
-} = useFieldPreferences('list', categoryPath.value, props.smartDefaults || []); // TYPE level category + smart defaults
+} = useFieldPreferences('list', categoryPath.value, props.smartDefaults || [], {
+    preferenceName: 'submission-visible-fields',
+}); // Shared fields between overview/detail
 
 // Clear new fields notification
 const clearNewFields = async () => {
@@ -203,7 +223,7 @@ const clearNewFields = async () => {
 // Column visibility - combine system columns with user-selected fields
 const visibleColumns = computed(() => {
     const cols = new Set<string>(['checkbox', 'status', 'id', 'actions']); // System columns always visible
-    visibleFields.value.forEach((field) => cols.add(field));
+    visibleFieldOrder.value.forEach((field) => cols.add(field));
     return cols;
 });
 
@@ -236,8 +256,8 @@ const allAvailableFields = computed(() => {
         fields = props.stationFields || [];
     }
 
-    // Filter out internal fields from user UI
-    return filterOutTechnicalFields(fields);
+    // Filter out internal fields from user UI + collapse aliases to canonical keys
+    return dedupeFieldsByCanonicalKey(filterOutTechnicalFields(fields));
 });
 
 // Check if a field is new (recently detected)
@@ -251,34 +271,66 @@ const groupedFields = computed(() =>
 
 // Computed property for visible fields (ensures reactivity)
 const visibleFieldList = computed(() => {
-    return allAvailableFields.value.filter((f: FieldInfo) =>
-        visibleFields.value.has(f.key),
-    );
+    const map = new Map<string, FieldInfo>();
+    allAvailableFields.value.forEach((f) => map.set(toCanonicalFieldKey(f.key), f));
+
+    return visibleFieldOrder.value
+        .map((k) => map.get(toCanonicalFieldKey(k)))
+        .filter(Boolean) as FieldInfo[];
 });
 
 // Computed property that returns the Set directly for template use
 // This ensures Vue tracks changes and auto-unwraps properly
 const visibleFieldsSet = computed(() => {
-    return visibleFields.value || new Set<string>();
+    return visibleFieldSet.value || new Set<string>();
 });
 
 // Create a computed getter/setter for each field's checked state
 // This is needed for v-model:checked to work with reka-ui Checkbox
 const getFieldChecked = (fieldKey: string) => {
     return computed({
-        get: () => visibleFields.value?.has(fieldKey) ?? false,
+        get: () => visibleFieldSet.value?.has(fieldKey) ?? false,
         set: (value: boolean | 'indeterminate') => {
             if (typeof value === 'boolean') {
-                const newSet = new Set(visibleFields.value);
-                if (value) {
-                    newSet.add(fieldKey);
-                } else {
-                    newSet.delete(fieldKey);
-                }
-                visibleFields.value = newSet;
+                toggleField(fieldKey);
             }
         },
     });
+};
+
+// Save column preferences - saves as single default preference (auto-save on change)
+async function saveColumnPreferences(): Promise<boolean> {
+    const checkedFields = visibleFieldOrder.value.slice();
+
+    // Only save fields that exist in availableFields (prevent saving non-existent fields)
+    const validFields = checkedFields.filter((fieldKey) =>
+        allAvailableFields.value.some((f: FieldInfo) => f.key === fieldKey),
+    );
+
+    if (validFields.length === 0) {
+        return false;
+    }
+
+    return await savePreferences(validFields, {
+        preferenceName: 'submission-visible-fields',
+        asDefault: true,
+    });
+}
+
+// Drag & drop ordering for selected columns
+const draggingKey = ref<string | null>(null);
+const onDragStart = (key: string) => {
+    draggingKey.value = key;
+};
+const onDropOn = async (targetKey: string) => {
+    if (!draggingKey.value) return;
+    const from = draggingKey.value;
+    draggingKey.value = null;
+    if (from === targetKey) return;
+    const toIndex = visibleFieldOrder.value.findIndex((k) => k === targetKey);
+    if (toIndex < 0) return;
+    moveField(from, toIndex);
+    await saveColumnPreferences();
 };
 
 // Check if current user has read the submission
@@ -286,6 +338,10 @@ const isReadByCurrentUser = (submission: ContactSubmission): boolean => {
     return submission.reads_with_users.some(
         (read) => read.user_id === authUser.value?.id,
     );
+};
+
+const isMarkedByCurrentUser = (submission: ContactSubmission): boolean => {
+    return (submission.marks || []).some((m) => m.user_id === authUser.value?.id);
 };
 
 // Get initials for avatar - handles full name or separate first/last names
@@ -411,13 +467,15 @@ const applyFilters = () => {
     if (birthYearMin.value) params.birth_year_min = birthYearMin.value;
     if (birthYearMax.value) params.birth_year_max = birthYearMax.value;
     if (zipCode.value) params.zip_code = zipCode.value;
+    if (plzFrom.value) params.plz_from = plzFrom.value;
+    if (plzTo.value) params.plz_to = plzTo.value;
     if (city.value) params.city = city.value;
     if (gender.value) params.gender = gender.value;
-    if (radius.value && radiusLat.value && radiusLng.value) {
+    if (radius.value && radiusPlz.value) {
         params.radius = radius.value;
-        params.radius_lat = radiusLat.value;
-        params.radius_lng = radiusLng.value;
+        params.radius_plz = radiusPlz.value;
     }
+    if (hideDuplicates.value) params.hide_duplicates = '1';
 
     // Sorting
     if (sortColumn.value) params.sort_column = sortColumn.value;
@@ -426,6 +484,12 @@ const applyFilters = () => {
     router.get(`/forms/${props.webformId}`, params, {
         preserveState: true,
         replace: true,
+        onFinish: () => {
+            nextTick(() => {
+                const firstRow = document.querySelector('tbody tr') as HTMLElement | null;
+                firstRow?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            });
+        },
     });
 };
 
@@ -440,11 +504,13 @@ const clearFilters = () => {
     birthYearMin.value = '';
     birthYearMax.value = '';
     zipCode.value = '';
+    plzFrom.value = '';
+    plzTo.value = '';
     city.value = '';
     gender.value = '';
     radius.value = '';
-    radiusLat.value = '';
-    radiusLng.value = '';
+    radiusPlz.value = '';
+    hideDuplicates.value = false;
     applyFilters();
 };
 
@@ -474,12 +540,77 @@ const bulkMarkAsRead = () => {
 const exportSelected = () => {
     if (selectedRows.value.size === 0) return;
 
-    // TODO: Implement export functionality
-    console.log('Exporting:', Array.from(selectedRows.value));
+    const ids = Array.from(selectedRows.value);
+    const fields = visibleFieldOrder.value;
+    const baseParams = new URLSearchParams();
+    ids.forEach((id) => baseParams.append('ids[]', String(id)));
+    fields.forEach((f) => baseParams.append('fields[]', String(f)));
+
+    // Reuse current filter/sort params from URL
+    const current = new URLSearchParams(window.location.search);
+    current.forEach((v, k) => baseParams.append(k, v));
+
+    const csvUrl = `/forms/${props.webformId}/export?format=csv&${baseParams.toString()}`;
+    const xlsxUrl = `/forms/${props.webformId}/export?format=xlsx&${baseParams.toString()}`;
+
+    const choice = prompt('Export format: csv or xlsx', 'csv');
+    const url = (choice || '').toLowerCase() === 'xlsx' ? xlsxUrl : csvUrl;
+    window.open(url, '_blank');
 };
 
-// Toggle read status
-import { postJson } from '@/lib/api';
+const exportCurrentView = () => {
+    const fields = visibleFieldOrder.value;
+    const params = new URLSearchParams(window.location.search);
+    fields.forEach((f) => params.append('fields[]', String(f)));
+
+    const csvUrl = `/forms/${props.webformId}/export?format=csv&${params.toString()}`;
+    const xlsxUrl = `/forms/${props.webformId}/export?format=xlsx&${params.toString()}`;
+    const choice = prompt('Export format: csv or xlsx', 'csv');
+    const url = (choice || '').toLowerCase() === 'xlsx' ? xlsxUrl : csvUrl;
+    window.open(url, '_blank');
+};
+
+const printTable = () => {
+    const cols = visibleFieldList.value;
+    const rows = props.submissions.data || [];
+
+    const ths = ['ID', ...cols.map((c) => c.label), 'Date'].map((h) => `<th>${h}</th>`).join('');
+    const trs = rows
+        .map((s) => {
+            const tds = [
+                `<td>#${s.id}</td>`,
+                ...cols.map((c) => `<td>${String(getFieldValue(s.data, c.key) ?? '')}</td>`),
+                `<td>${new Date(s.created_at).toLocaleString()}</td>`,
+            ].join('');
+            return `<tr>${tds}</tr>`;
+        })
+        .join('');
+
+    const w = window.open('', '_blank');
+    if (!w) return;
+    w.document.write(`
+      <html>
+        <head>
+          <title>Print</title>
+          <style>
+            body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; padding: 16px; }
+            table { width: 100%; border-collapse: collapse; }
+            th, td { border: 1px solid #ddd; padding: 8px; font-size: 12px; vertical-align: top; }
+            th { background: #f5f5f5; text-align: left; }
+          </style>
+        </head>
+        <body>
+          <h2>${props.formName}</h2>
+          <table>
+            <thead><tr>${ths}</tr></thead>
+            <tbody>${trs}</tbody>
+          </table>
+          <script>window.onload = () => { window.print(); }<\/script>
+        </body>
+      </html>
+    `);
+    w.document.close();
+};
 
 const toggleRead = async (submission: ContactSubmission) => {
     try {
@@ -495,6 +626,19 @@ const toggleRead = async (submission: ContactSubmission) => {
     }
 };
 
+const toggleMark = async (submission: ContactSubmission) => {
+    try {
+        await postJson(`/contact-messages/${submission.id}/toggle-mark`);
+
+        await router.get(window.location.pathname + window.location.search, {
+            preserveState: false,
+            preserveScroll: true,
+        });
+    } catch (error) {
+        console.error('Error toggling mark:', error);
+    }
+};
+
 // Delete submission
 const deleteSubmission = (submission: ContactSubmission) => {
     if (
@@ -506,41 +650,9 @@ const deleteSubmission = (submission: ContactSubmission) => {
 
 // Handle checkbox change - toggle approach (simpler, matches Contact/Show.vue pattern)
 const handleFieldCheckboxChange = async (fieldKey: string) => {
-    console.log('=== CHECKBOX CLICKED ===');
-    console.log('Field:', fieldKey);
-    console.log('visibleFields ref:', visibleFields);
-    if (!visibleFields || !visibleFields.value) {
-        console.error('❌ visibleFields is not initialized!');
-        return;
-    }
-    console.log('Current state before:', visibleFields.value.has(fieldKey));
-
     try {
-        // Toggle the field
-        const newSet = new Set(visibleFields.value);
-        if (newSet.has(fieldKey)) {
-            newSet.delete(fieldKey);
-            console.log('Removed field:', fieldKey);
-        } else {
-            newSet.add(fieldKey);
-            console.log('Added field:', fieldKey);
-        }
-        visibleFields.value = newSet;
-
-        console.log('Current state after:', visibleFields.value.has(fieldKey));
-        console.log('All visible fields:', Array.from(visibleFields.value));
-        console.log('visibleFields.size:', visibleFields.value.size);
-
-        // Auto-save
-        console.log('Calling saveColumnPreferences...');
-        const saveResult = await saveColumnPreferences();
-        console.log('Save result:', saveResult);
-
-        if (saveResult) {
-            console.log('✅ Preferences saved successfully');
-        } else {
-            console.error('❌ Failed to save preferences');
-        }
+        toggleField(fieldKey);
+        await saveColumnPreferences();
     } catch (error) {
         console.error('ERROR in handleFieldCheckboxChange:', error);
         console.error('Error stack:', (error as Error).stack);
@@ -549,66 +661,6 @@ const handleFieldCheckboxChange = async (fieldKey: string) => {
 };
 
 // Removed setFieldVisibility - using handleFieldCheckboxChange directly
-
-// Save column preferences - saves as single default preference (auto-save on change)
-const saveColumnPreferences = async (): Promise<boolean> => {
-    console.log('=== saveColumnPreferences called ===');
-
-    // Ensure we have the latest value (handle both ref and unwrapped cases)
-    const currentFields = visibleFields.value || visibleFields;
-    if (!currentFields) {
-        console.error(
-            '❌ visibleFields is undefined in saveColumnPreferences!',
-        );
-        return false;
-    }
-
-    // Get ONLY the fields that are currently checked (in visibleFields)
-    const checkedFields = Array.from(currentFields);
-    console.log('✅ Current visibleFields state:', checkedFields);
-    console.log('✅ visibleFields.size:', currentFields.size);
-    console.log(
-        '✅ visibleFields type:',
-        currentFields instanceof Set ? 'Set' : typeof currentFields,
-    );
-
-    // Only save fields that exist in availableFields (prevent saving non-existent fields)
-    const validFields = checkedFields.filter((fieldKey) =>
-        allAvailableFields.value.some((f: FieldInfo) => f.key === fieldKey),
-    );
-
-    console.log('Valid fields to save:', validFields);
-    console.log(
-        'All available fields:',
-        allAvailableFields.value.map((f: FieldInfo) => f.key),
-    );
-
-    if (validFields.length === 0) {
-        console.warn('⚠️ No valid fields to save - skipping');
-        return false;
-    }
-
-    console.log('Calling savePreferences with:', {
-        fields: validFields,
-        preferenceName: 'list-view-columns',
-        asDefault: true,
-        category: categoryPath.value,
-    });
-
-    // Save as single default preference (is_default: true)
-    // This replaces any existing preference for this category
-    try {
-        const result = await savePreferences(validFields, {
-            preferenceName: 'list-view-columns', // Default preference name
-            asDefault: true, // Always save as default (single preference per category)
-        });
-        console.log('savePreferences returned:', result);
-        return result;
-    } catch (error) {
-        console.error('❌ Error in savePreferences:', error);
-        throw error;
-    }
-};
 
 // Load preferences (wrapper to use composable)
 const loadPreferencesWrapper = async () => {
@@ -639,12 +691,31 @@ const onFieldCheckboxClick = (fieldKey: string, e?: MouseEvent) => {
     });
 };
 
-onMounted(async () => {
-    // Test: Verify visibleFields is initialized
-    console.log('=== MOUNTED ===');
-    console.log('visibleFields ref:', visibleFields);
-    console.log('visibleFields.value:', visibleFields?.value);
+// Retention settings
+const retentionDaysInput = ref<string>(props.retentionDays != null ? String(props.retentionDays) : '');
+const retentionNotes = ref('');
+const savingRetention = ref(false);
+const retentionSaved = ref(false);
 
+const saveRetentionRule = async () => {
+    savingRetention.value = true;
+    retentionSaved.value = false;
+    try {
+        const days = retentionDaysInput.value.trim() !== '' ? parseInt(retentionDaysInput.value, 10) : null;
+        await postJson(`/forms/${props.webformId}/retention-rule`, {
+            retention_days: days,
+            notes: retentionNotes.value || null,
+        }, { method: 'PUT' });
+        retentionSaved.value = true;
+        setTimeout(() => { retentionSaved.value = false; }, 3000);
+    } catch (e) {
+        console.error('Failed to save retention rule', e);
+    } finally {
+        savingRetention.value = false;
+    }
+};
+
+onMounted(async () => {
     // Auto-apply filters on mount if they exist
     if (searchQuery.value || selectedStatus.value !== 'all') {
         applyFilters();
@@ -653,59 +724,13 @@ onMounted(async () => {
     // Load user preferences
     await loadPreferencesWrapper();
 
-    // Test: Verify functions are accessible
-    console.log(
-        'handleFieldCheckboxChange function:',
-        typeof handleFieldCheckboxChange,
-    );
-    console.log(
-        'saveColumnPreferences function:',
-        typeof saveColumnPreferences,
-    );
-    console.log(
-        'visibleFields after load:',
-        visibleFields?.value ? Array.from(visibleFields.value) : 'undefined',
-    );
-    console.log(
-        'visibleFields.size after load:',
-        visibleFields?.value?.size || 0,
-    );
-    console.log(
-        'visibleFieldsSet computed:',
-        Array.from(visibleFieldsSet.value),
-    );
-    console.log('visibleFieldsSet.size:', visibleFieldsSet.value.size);
-    console.log('allAvailableFields:', allAvailableFields.value);
-
-    // Verify checkbox state for a few fields
-    if (
-        visibleFieldsSet.value.size > 0 &&
-        allAvailableFields.value.length > 0
-    ) {
-        const testFields = ['email', 'fname', 'lname', 'sid', 'zip'];
-        testFields.forEach((fieldKey) => {
-            const isVisible = visibleFieldsSet.value.has(fieldKey);
-            console.log(
-                `Field "${fieldKey}": visibleFieldsSet.has()=${isVisible}`,
-            );
-        });
-    }
-
-    // If no preferences loaded, use smart defaults
-    if (
-        visibleFields &&
-        visibleFields.value &&
-        visibleFields.value.size === 0 &&
-        allAvailableFields.value.length > 0
-    ) {
-        console.log('No preferences found, using smart defaults');
+    // If no preference found, apply smart defaults (canonical + ordered)
+    if (visibleFieldOrder.value.length === 0 && allAvailableFields.value.length > 0) {
         const defaults =
             props.smartDefaults ||
             allAvailableFields.value.slice(0, 4).map((f: FieldInfo) => f.key);
-        if (visibleFields.value) {
-            visibleFields.value = new Set(defaults);
-            console.log('Set defaults:', Array.from(visibleFields.value));
-        }
+        setAllFields(defaults, true);
+        await saveColumnPreferences();
     }
 });
 </script>
@@ -723,7 +748,7 @@ onMounted(async () => {
                     <Link :href="userDashboard().url">
                         <Button variant="outline" size="sm">
                             <ArrowLeft class="mr-2 h-4 w-4" />
-                            Back to Form Center
+                            {{ t('forms.back') }}
                         </Button>
                     </Link>
                     <div>
@@ -734,11 +759,8 @@ onMounted(async () => {
                             {{ formName }}
                         </h1>
                         <p class="mt-1 text-muted-foreground">
-                            {{ totalCount }} total
-                            {{
-                                totalCount === 1 ? 'submission' : 'submissions'
-                            }}
-                            • Station: {{ station }}
+                            {{ totalCount }} {{ t('forms.total_submissions') }}
+                            • {{ t('forms.station') }}: {{ station }}
                         </p>
                         <p class="text-xs text-muted-foreground">
                             Form ID: {{ webformId }}
@@ -749,6 +771,23 @@ onMounted(async () => {
                     <Badge variant="secondary" class="h-8 px-3">{{
                         station
                     }}</Badge>
+                    <Button
+                        variant="outline"
+                        size="sm"
+                        @click="hideDuplicates = !hideDuplicates; applyFilters()"
+                        :class="hideDuplicates ? 'border-orange-400 text-orange-600' : ''"
+                        title="When enabled, duplicate submissions (same email/phone/name/PLZ/birthyear) are collapsed into a single row with a count badge."
+                    >
+                        <Eye class="mr-2 h-4 w-4" />
+                        {{ hideDuplicates ? t('forms.duplicates_hidden') : t('forms.duplicates_shown') }}
+                    </Button>
+                    <Button variant="outline" size="sm" @click="exportCurrentView">
+                        <Download class="mr-2 h-4 w-4" />
+                        {{ t('forms.export') }}
+                    </Button>
+                    <Button variant="outline" size="sm" @click="printTable">
+                        {{ t('forms.print') }}
+                    </Button>
                 </div>
             </div>
 
@@ -758,45 +797,50 @@ onMounted(async () => {
                     <div class="flex items-center justify-between">
                         <CardTitle class="flex items-center gap-2">
                             <Columns class="h-5 w-5" />
-                            Show/Hide Columns
+                            {{ t('columns.title') }}
                         </CardTitle>
                         <div class="flex gap-2">
                             <Button
                                 variant="ghost"
                                 size="sm"
-                                @click="
-                                    async () => {
-                                        const newSet = new Set(visibleFields);
-                                        allAvailableFields.forEach(
-                                            (f: FieldInfo) => {
-                                                newSet.add(f.key);
-                                            },
-                                        );
-                                        visibleFields = newSet;
-                                        await saveColumnPreferences();
-                                    }
-                                "
+                                @click="async () => { setAllFields(allAvailableFields.map((f) => f.key), true); await saveColumnPreferences(); }"
                                 class="h-8 text-xs"
                             >
-                                Select All
+                                {{ t('columns.select_all') }}
                             </Button>
                             <Button
                                 variant="ghost"
                                 size="sm"
-                                @click="
-                                    async () => {
-                                        visibleFields = new Set();
-                                        await saveColumnPreferences();
-                                    }
-                                "
+                                @click="async () => { setAllFields([], false); await saveColumnPreferences(); }"
                                 class="h-8 text-xs"
                             >
-                                Clear All
+                                {{ t('columns.clear_all') }}
                             </Button>
                         </div>
                     </div>
                 </CardHeader>
                 <CardContent>
+                    <!-- Reorder selected columns -->
+                    <div v-if="visibleFieldList.length > 1" class="mb-4">
+                        <div class="text-xs font-semibold text-muted-foreground mb-2">
+                            Reorder selected columns (drag & drop)
+                        </div>
+                        <div class="flex flex-wrap gap-2">
+                            <div
+                                v-for="field in visibleFieldList"
+                                :key="`reorder-${field.key}`"
+                                class="cursor-move select-none rounded border bg-background px-2 py-1 text-xs hover:bg-muted"
+                                draggable="true"
+                                @dragstart="onDragStart(field.key)"
+                                @dragover.prevent
+                                @drop.prevent="onDropOn(field.key)"
+                                :title="field.label"
+                            >
+                                {{ field.label }}
+                            </div>
+                        </div>
+                    </div>
+
                     <div class="flex flex-wrap gap-4">
                         <label
                             v-for="field in allAvailableFields"
@@ -805,19 +849,8 @@ onMounted(async () => {
                         >
                             <input
                                 type="checkbox"
-                                :checked="visibleFields.has(field.key)"
-                                @change="
-                                    async () => {
-                                        const newSet = new Set(visibleFields);
-                                        if (newSet.has(field.key)) {
-                                            newSet.delete(field.key);
-                                        } else {
-                                            newSet.add(field.key);
-                                        }
-                                        visibleFields = newSet;
-                                        await saveColumnPreferences();
-                                    }
-                                "
+                                :checked="visibleFieldSet.has(field.key)"
+                                @change="async () => { await handleFieldCheckboxChange(field.key); }"
                                 class="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
                             />
                             <span class="text-sm font-medium select-none">{{
@@ -842,7 +875,7 @@ onMounted(async () => {
                                 >Saving...</span
                             >
                             <span
-                                v-else-if="visibleFields.size > 0"
+                                v-else-if="visibleFieldOrder.length > 0"
                                 class="text-green-600"
                                 >✓ Saved</span
                             >
@@ -861,7 +894,7 @@ onMounted(async () => {
                     <div class="flex items-center justify-between">
                         <CardTitle class="flex items-center gap-2">
                             <Filter class="h-5 w-5" />
-                            Filters
+                            {{ t('filter.title') }}
                         </CardTitle>
                         <div class="flex gap-2">
                             <Button
@@ -871,8 +904,7 @@ onMounted(async () => {
                                     showAdvancedFilters = !showAdvancedFilters
                                 "
                             >
-                                {{ showAdvancedFilters ? 'Hide' : 'Show' }}
-                                Advanced
+                                {{ showAdvancedFilters ? t('filter.hide_advanced') : t('filter.advanced') }}
                                 <ChevronDown
                                     v-if="!showAdvancedFilters"
                                     class="ml-2 h-4 w-4"
@@ -885,7 +917,7 @@ onMounted(async () => {
                                 @click="clearFilters"
                             >
                                 <XCircle class="mr-2 h-4 w-4" />
-                                Clear All
+                                {{ t('filter.clear_all') }}
                             </Button>
                         </div>
                     </div>
@@ -894,28 +926,27 @@ onMounted(async () => {
                     <!-- Basic Filters -->
                     <div class="mb-4 grid grid-cols-1 gap-4 md:grid-cols-3">
                         <div class="space-y-2">
-                            <label class="text-sm font-medium">Search</label>
+                            <label class="text-sm font-medium">{{ t('filter.search') }}</label>
                             <Input
                                 v-model="searchQuery"
-                                placeholder="Search submissions..."
+                                :placeholder="t('filter.search_placeholder')"
                                 @keyup.enter="applyFilters"
                             />
                         </div>
                         <div class="space-y-2">
-                            <label class="text-sm font-medium">Status</label>
+                            <label class="text-sm font-medium">{{ t('filter.status') }}</label>
                             <select
                                 v-model="selectedStatus"
                                 class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
                             >
-                                <option value="all">All Messages</option>
-                                <option value="unread">Unread</option>
-                                <option value="read">Read</option>
+                                <option value="all">{{ t('filter.status_all') }}</option>
+                                <option value="unread">{{ t('filter.status_unread') }}</option>
+                                <option value="read">{{ t('filter.status_read') }}</option>
+                                <option value="starred">{{ t('filter.status_starred') }}</option>
                             </select>
                         </div>
                         <div class="space-y-2">
-                            <label class="text-sm font-medium"
-                                >Date Range</label
-                            >
+                            <label class="text-sm font-medium">{{ t('filter.date_range') }}</label>
                             <div class="flex gap-2">
                                 <Input
                                     v-model="dateFrom"
@@ -998,6 +1029,25 @@ onMounted(async () => {
                                 />
                             </div>
 
+                            <!-- PLZ Range -->
+                            <div class="space-y-2">
+                                <label class="text-sm font-medium"
+                                    >PLZ Range</label
+                                >
+                                <div class="flex gap-2">
+                                    <Input
+                                        v-model="plzFrom"
+                                        placeholder="From"
+                                        inputmode="numeric"
+                                    />
+                                    <Input
+                                        v-model="plzTo"
+                                        placeholder="To"
+                                        inputmode="numeric"
+                                    />
+                                </div>
+                            </div>
+
                             <!-- City -->
                             <div class="space-y-2">
                                 <label class="text-sm font-medium"
@@ -1038,20 +1088,11 @@ onMounted(async () => {
                                         min="0"
                                         step="0.1"
                                     />
-                                    <div class="flex gap-2">
-                                        <Input
-                                            v-model="radiusLat"
-                                            type="number"
-                                            placeholder="Latitude"
-                                            step="0.000001"
-                                        />
-                                        <Input
-                                            v-model="radiusLng"
-                                            type="number"
-                                            placeholder="Longitude"
-                                            step="0.000001"
-                                        />
-                                    </div>
+                                    <Input
+                                        v-model="radiusPlz"
+                                        placeholder="Center PLZ"
+                                        inputmode="numeric"
+                                    />
                                 </div>
                             </div>
                         </div>
@@ -1061,7 +1102,7 @@ onMounted(async () => {
                     <div class="mt-4 flex justify-end">
                         <Button @click="applyFilters">
                             <Search class="mr-2 h-4 w-4" />
-                            Apply Filters
+                            {{ t('filter.apply') }}
                         </Button>
                     </div>
                 </CardContent>
@@ -1073,28 +1114,26 @@ onMounted(async () => {
                 class="flex items-center gap-2 rounded-lg bg-blue-50 p-4 dark:bg-blue-950"
             >
                 <span class="text-sm font-medium">
-                    {{ selectedRows.size }}
-                    {{ selectedRows.size === 1 ? 'submission' : 'submissions' }}
-                    selected
+                    {{ selectedRows.size }} {{ t('bulk.selected') }}
                 </span>
                 <div class="ml-auto flex gap-2">
                     <Button variant="outline" size="sm" @click="bulkMarkAsRead">
-                        Mark as Read
+                        {{ t('bulk.mark_read') }}
                     </Button>
                     <Button variant="outline" size="sm" @click="exportSelected">
                         <Download class="mr-2 h-4 w-4" />
-                        Export
+                        {{ t('bulk.export') }}
                     </Button>
                     <Button variant="destructive" size="sm" @click="bulkDelete">
                         <Trash2 class="mr-2 h-4 w-4" />
-                        Delete
+                        {{ t('bulk.delete') }}
                     </Button>
                     <Button
                         variant="ghost"
                         size="sm"
                         @click="selectedRows.clear()"
                     >
-                        Clear Selection
+                        {{ t('bulk.clear') }}
                     </Button>
                 </div>
             </div>
@@ -1110,10 +1149,10 @@ onMounted(async () => {
                     >
                         <FileText class="mx-auto h-12 w-12 text-gray-400" />
                         <h3 class="mt-4 text-lg font-medium text-gray-900">
-                            No submissions found
+                            {{ t('table.no_results') }}
                         </h3>
                         <p class="mt-2 text-gray-500">
-                            No submissions match your current filters.
+                            {{ t('table.no_results_desc') }}
                         </p>
                     </div>
 
@@ -1132,12 +1171,12 @@ onMounted(async () => {
                                 <TableHead
                                     v-if="visibleColumns.has('status')"
                                     class="w-12"
-                                    >Status</TableHead
+                                    >{{ t('table.status') }}</TableHead
                                 >
                                 <TableHead
                                     v-if="visibleColumns.has('id')"
                                     class="w-16"
-                                    >ID</TableHead
+                                    >{{ t('table.id') }}</TableHead
                                 >
                                 <!-- Dynamic field columns -->
                                 <TableHead
@@ -1159,7 +1198,7 @@ onMounted(async () => {
                                 <TableHead
                                     v-if="visibleColumns.has('actions')"
                                     class="w-48 text-right"
-                                    >Actions</TableHead
+                                    >{{ t('table.actions') }}</TableHead
                                 >
                             </TableRow>
                         </TableHeader>
@@ -1202,7 +1241,7 @@ onMounted(async () => {
                                 <!-- Status -->
                                 <TableCell v-if="visibleColumns.has('status')">
                                     <div
-                                        class="flex items-center justify-center"
+                                        class="flex items-center justify-center gap-2"
                                     >
                                         <CheckCircle2
                                             v-if="
@@ -1216,6 +1255,27 @@ onMounted(async () => {
                                             class="h-4 w-4 text-blue-600"
                                             title="Unread"
                                         />
+                                        <button
+                                            type="button"
+                                            class="inline-flex items-center"
+                                            @click="toggleMark(submission)"
+                                            :title="
+                                                isMarkedByCurrentUser(submission)
+                                                    ? 'Unmark'
+                                                    : 'Mark'
+                                            "
+                                        >
+                                            <Star
+                                                class="h-4 w-4"
+                                                :class="
+                                                    isMarkedByCurrentUser(
+                                                        submission,
+                                                    )
+                                                        ? 'text-yellow-500 fill-yellow-500'
+                                                        : 'text-gray-300 hover:text-yellow-400'
+                                                "
+                                            />
+                                        </button>
                                     </div>
                                 </TableCell>
 
@@ -1224,7 +1284,14 @@ onMounted(async () => {
                                     v-if="visibleColumns.has('id')"
                                     class="font-mono text-sm text-gray-500"
                                 >
-                                    #{{ submission.id }}
+                                    <div class="flex items-center gap-1">
+                                        #{{ submission.id }}
+                                        <span
+                                            v-if="(submission.duplicate_count ?? 1) > 1"
+                                            class="inline-flex items-center justify-center rounded-full bg-orange-100 px-1.5 py-0.5 text-xs font-semibold text-orange-700 leading-none"
+                                            :title="`${submission.duplicate_count} duplicate submissions with the same email/phone/name/PLZ/birthyear`"
+                                        >×{{ submission.duplicate_count }}</span>
+                                    </div>
                                 </TableCell>
 
                                 <!-- Dynamic field columns -->
@@ -1442,6 +1509,50 @@ onMounted(async () => {
                     </template>
                 </nav>
             </div>
+
+            <!-- Retention / Data Deletion Rule -->
+            <Card>
+                <CardHeader>
+                    <CardTitle class="flex items-center gap-2 text-base">
+                        <Trash2 class="h-4 w-4 text-red-500" />
+                        {{ t('retention.title') }}
+                    </CardTitle>
+                </CardHeader>
+                <CardContent>
+                    <p class="mb-4 text-sm text-muted-foreground">
+                        {{ t('retention.description') }}
+                    </p>
+                    <div class="flex items-end gap-4">
+                        <div class="space-y-1">
+                            <label class="text-sm font-medium">{{ t('retention.days_label') }}</label>
+                            <Input
+                                v-model="retentionDaysInput"
+                                type="number"
+                                min="1"
+                                max="3650"
+                                :placeholder="t('retention.days_placeholder')"
+                                class="w-56"
+                            />
+                        </div>
+                        <Button
+                            @click="saveRetentionRule"
+                            :disabled="savingRetention"
+                            variant="outline"
+                            size="sm"
+                        >
+                            <Save class="mr-2 h-4 w-4" />
+                            {{ savingRetention ? t('retention.saving') : t('retention.save') }}
+                        </Button>
+                        <span v-if="retentionSaved" class="text-sm text-green-600">{{ t('retention.saved') }}</span>
+                        <span v-if="retentionDaysInput === ''" class="text-xs text-muted-foreground">
+                            {{ t('retention.forever') }}
+                        </span>
+                        <span v-else class="text-xs text-muted-foreground">
+                            {{ t('retention.will_delete', { days: retentionDaysInput }) }}
+                        </span>
+                    </div>
+                </CardContent>
+            </Card>
         </div>
     </AppLayout>
 </template>

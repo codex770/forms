@@ -17,6 +17,8 @@ class ContactSubmission extends Model
         'station',
         'data',
         'ip_address',
+        'ip_hash',
+        'dedupe_hash',
     ];
 
     protected $casts = [
@@ -29,6 +31,37 @@ class ContactSubmission extends Model
     public function reads(): HasMany
     {
         return $this->hasMany(ContactRead::class);
+    }
+
+    /**
+     * Get all mark (star) records for this submission.
+     */
+    public function marks(): HasMany
+    {
+        return $this->hasMany(ContactMark::class);
+    }
+
+    /**
+     * Get marks with user information, ordered by mark time.
+     */
+    public function marksWithUsers(): HasMany
+    {
+        return $this->hasMany(ContactMark::class)
+            ->with('user:id,name')
+            ->orderBy('marked_at');
+    }
+
+    public function isMarkedByUser(int $userId): bool
+    {
+        return $this->marks()->where('user_id', $userId)->exists();
+    }
+
+    public function markBy(int $userId): ContactMark
+    {
+        return $this->marks()->firstOrCreate(
+            ['user_id' => $userId],
+            ['marked_at' => now()]
+        );
     }
 
     /**

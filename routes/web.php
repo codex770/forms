@@ -59,6 +59,9 @@ Route::post('contact/bigkarriere', [App\Http\Controllers\ContactController::clas
 Route::middleware(['auth', 'verified'])->group(function () {
     // Form detail view - shows submissions for a specific webform_id
     Route::get('forms/{webformId}', [App\Http\Controllers\ContactController::class, 'showFormDetail'])->name('forms.detail');
+    Route::get('forms/{webformId}/export', [App\Http\Controllers\ContactController::class, 'exportFormSubmissions'])->name('forms.export');
+    Route::get('forms/{webformId}/retention-rule', [App\Http\Controllers\ContactController::class, 'getRetentionRule'])->name('forms.retention.get');
+    Route::put('forms/{webformId}/retention-rule', [App\Http\Controllers\ContactController::class, 'saveRetentionRule'])->name('forms.retention.save');
 
     // Clear new fields notification
     Route::post('forms/{webformId}/clear-new-fields', function (string $webformId) {
@@ -80,6 +83,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('contact-messages', [App\Http\Controllers\ContactController::class, 'index'])->name('contact.index');
     Route::get('contact-messages/{submission}', [App\Http\Controllers\ContactController::class, 'show'])->name('contact.show');
     Route::post('contact-messages/{submission}/toggle-read', [App\Http\Controllers\ContactController::class, 'toggleRead'])->name('contact.toggle-read');
+    Route::post('contact-messages/{submission}/toggle-mark', [App\Http\Controllers\ContactController::class, 'toggleMark'])->name('contact.toggle-mark');
     Route::delete('contact-messages/{submission}', [App\Http\Controllers\ContactController::class, 'destroy'])->name('contact.destroy');
 });
 

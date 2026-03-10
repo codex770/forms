@@ -1,11 +1,11 @@
-export async function postJson(url: string, body?: any) {
+export async function postJson(url: string, body?: any, options?: { method?: string }) {
     const token =
         document
             .querySelector('meta[name="csrf-token"]')
             ?.getAttribute('content') || '';
 
     const res = await fetch(url, {
-        method: 'POST',
+        method: options?.method ?? 'POST',
         headers: {
             'Content-Type': 'application/json',
             Accept: 'application/json',

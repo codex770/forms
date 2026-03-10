@@ -2,16 +2,278 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\ContactMark;
+use App\Models\ContactRetentionRule;
 use App\Models\ContactSubmission;
 use App\Helpers\FormDefaultsHelper;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Str;
 use Inertia\Inertia;
 use Inertia\Response;
 
 class ContactController extends Controller
 {
+    private function resolveExportValue(array $data, string $field)
+    {
+        $field = strtolower(trim($field));
+        if ($field === '') return null;
+
+        $aliases = [
+            'first_name' => ['first_name', 'fname', 'vorname'],
+            'last_name' => ['last_name', 'lname', 'nachname'],
+            'birthday' => ['birthday', 'bday', 'geburtstag', 'date_of_birth', 'dob'],
+            'postal_code' => ['plz', 'zip', 'zip_code', 'postal_code', 'postcode'],
+            'email' => ['email', 'email_address', 'e_mail'],
+            'phone' => ['phone', 'phone_number', 'tel', 'telephone', 'mobile'],
+            'birth_year' => ['birth_year', 'birthYear', 'year_of_birth'],
+            // leave others as-is
+        ];
+
+        $keys = $aliases[$field] ?? [$field];
+        foreach ($keys as $k) {
+            if (array_key_exists($k, $data)) {
+                $v = $data[$k];
+                if ($v !== null && $v !== '') return $v;
+            }
+        }
+        return null;
+    }
+
+    private function buildFormDetailQuery(string $webformId, Request $request)
+    {
+        $search = $request->get('search');
+        $status = $request->get('status', 'all'); // all, read, unread, starred
+        $dateFrom = $request->get('date_from');
+        $dateTo = $request->get('date_to');
+        $ageMin = $request->get('age_min');
+        $ageMax = $request->get('age_max');
+        $birthYearMin = $request->get('birth_year_min');
+        $birthYearMax = $request->get('birth_year_max');
+        $zipCode = $request->get('zip_code');
+        $plzFrom = $request->get('plz_from');
+        $plzTo = $request->get('plz_to');
+        $city = $request->get('city');
+        $gender = $request->get('gender');
+        $radius = $request->get('radius');
+        $radiusPlz = $request->get('radius_plz');
+
+        // Resolve radius center from PLZ (best-effort; no external service)
+        $radiusLat = null;
+        $radiusLng = null;
+        if ($radius && $radiusPlz) {
+            $cacheKey = 'plz_center:' . preg_replace('/\\D+/', '', (string) $radiusPlz);
+            $center = \Cache::remember($cacheKey, now()->addHours(12), function () use ($radiusPlz) {
+                $plz = preg_replace('/\\D+/', '', (string) $radiusPlz);
+                if ($plz === '') return null;
+
+                $submission = ContactSubmission::query()
+                    ->where(function ($q) use ($plz) {
+                        $q->whereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.plz")) = ?', [$plz])
+                            ->orWhereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.zip")) = ?', [$plz])
+                            ->orWhereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.zip_code")) = ?', [$plz])
+                            ->orWhereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.postal_code")) = ?', [$plz]);
+                    })
+                    ->whereRaw('JSON_EXTRACT(data, "$.latitude") IS NOT NULL')
+                    ->whereRaw('JSON_EXTRACT(data, "$.longitude") IS NOT NULL')
+                    ->orderByDesc('created_at')
+                    ->first(['data']);
+
+                if (!$submission || !is_array($submission->data)) return null;
+                $lat = $submission->data['latitude'] ?? null;
+                $lng = $submission->data['longitude'] ?? null;
+                if ($lat === null || $lng === null) return null;
+
+                return ['lat' => (float) $lat, 'lng' => (float) $lng];
+            });
+
+            if (is_array($center) && isset($center['lat'], $center['lng'])) {
+                $radiusLat = $center['lat'];
+                $radiusLng = $center['lng'];
+            }
+        }
+
+        $query = ContactSubmission::query()
+            ->with([
+                'readsWithUsers',
+                'marks' => function ($q) {
+                    $q->where('user_id', auth()->id());
+                },
+            ])
+            ->where('webform_id', $webformId)
+            ->when($search, function ($q, $search) {
+                $q->where(function ($query) use ($search) {
+                    $query->whereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.name")) LIKE ?', ["%{$search}%"])
+                        ->orWhereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.fname")) LIKE ?', ["%{$search}%"])
+                        ->orWhereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.lname")) LIKE ?', ["%{$search}%"])
+                        ->orWhereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.first_name")) LIKE ?', ["%{$search}%"])
+                        ->orWhereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.last_name")) LIKE ?', ["%{$search}%"])
+                        ->orWhereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.full_name")) LIKE ?', ["%{$search}%"])
+                        ->orWhereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.email")) LIKE ?', ["%{$search}%"])
+                        ->orWhereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.description")) LIKE ?', ["%{$search}%"])
+                        ->orWhereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.message")) LIKE ?', ["%{$search}%"])
+                        ->orWhereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.message_long")) LIKE ?', ["%{$search}%"])
+                        ->orWhereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.message_short")) LIKE ?', ["%{$search}%"])
+                        ->orWhereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.phone")) LIKE ?', ["%{$search}%"])
+                        ->orWhereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.city")) LIKE ?', ["%{$search}%"])
+                        ->orWhereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.zip")) LIKE ?', ["%{$search}%"])
+                        ->orWhereRaw('CAST(data AS CHAR) LIKE ?', ["%{$search}%"]);
+                });
+            })
+            ->when($dateFrom, fn ($q, $v) => $q->whereDate('created_at', '>=', $v))
+            ->when($dateTo, fn ($q, $v) => $q->whereDate('created_at', '<=', $v))
+            ->when($birthYearMin || $birthYearMax, function ($q) use ($birthYearMin, $birthYearMax) {
+                $q->where(function ($query) use ($birthYearMin, $birthYearMax) {
+                    if ($birthYearMin && $birthYearMax) {
+                        $query->where(function ($q) use ($birthYearMin, $birthYearMax) {
+                            $q->where(function ($subQ) use ($birthYearMin, $birthYearMax) {
+                                $subQ->whereRaw('CAST(JSON_EXTRACT(data, "$.birth_year") AS UNSIGNED) BETWEEN ? AND ?', [$birthYearMin, $birthYearMax])
+                                    ->orWhereRaw('CAST(JSON_EXTRACT(data, "$.birthYear") AS UNSIGNED) BETWEEN ? AND ?', [$birthYearMin, $birthYearMax])
+                                    ->orWhereRaw('CAST(JSON_EXTRACT(data, "$.year_of_birth") AS UNSIGNED) BETWEEN ? AND ?', [$birthYearMin, $birthYearMax]);
+                            })->orWhere(function ($subQ) use ($birthYearMin, $birthYearMax) {
+                                $subQ->whereRaw('YEAR(STR_TO_DATE(JSON_UNQUOTE(JSON_EXTRACT(data, "$.bday")), "%Y-%m-%d")) BETWEEN ? AND ?', [$birthYearMin, $birthYearMax])
+                                    ->orWhereRaw('YEAR(STR_TO_DATE(JSON_UNQUOTE(JSON_EXTRACT(data, "$.birthday")), "%Y-%m-%d")) BETWEEN ? AND ?', [$birthYearMin, $birthYearMax]);
+                            });
+                        });
+                    } else {
+                        if ($birthYearMin) {
+                            $query->where(function ($q) use ($birthYearMin) {
+                                $q->whereRaw('CAST(JSON_EXTRACT(data, "$.birth_year") AS UNSIGNED) >= ?', [$birthYearMin])
+                                    ->orWhereRaw('CAST(JSON_EXTRACT(data, "$.birthYear") AS UNSIGNED) >= ?', [$birthYearMin])
+                                    ->orWhereRaw('CAST(JSON_EXTRACT(data, "$.year_of_birth") AS UNSIGNED) >= ?', [$birthYearMin])
+                                    ->orWhereRaw('YEAR(STR_TO_DATE(JSON_UNQUOTE(JSON_EXTRACT(data, "$.bday")), "%Y-%m-%d")) >= ?', [$birthYearMin])
+                                    ->orWhereRaw('YEAR(STR_TO_DATE(JSON_UNQUOTE(JSON_EXTRACT(data, "$.birthday")), "%Y-%m-%d")) >= ?', [$birthYearMin]);
+                            });
+                        }
+                        if ($birthYearMax) {
+                            $query->where(function ($q) use ($birthYearMax) {
+                                $q->whereRaw('CAST(JSON_EXTRACT(data, "$.birth_year") AS UNSIGNED) <= ?', [$birthYearMax])
+                                    ->orWhereRaw('CAST(JSON_EXTRACT(data, "$.birthYear") AS UNSIGNED) <= ?', [$birthYearMax])
+                                    ->orWhereRaw('CAST(JSON_EXTRACT(data, "$.year_of_birth") AS UNSIGNED) <= ?', [$birthYearMax])
+                                    ->orWhereRaw('YEAR(STR_TO_DATE(JSON_UNQUOTE(JSON_EXTRACT(data, "$.bday")), "%Y-%m-%d")) <= ?', [$birthYearMax])
+                                    ->orWhereRaw('YEAR(STR_TO_DATE(JSON_UNQUOTE(JSON_EXTRACT(data, "$.birthday")), "%Y-%m-%d")) <= ?', [$birthYearMax]);
+                            });
+                        }
+                    }
+                });
+            })
+            ->when($ageMin || $ageMax, function ($q) use ($ageMin, $ageMax) {
+                $currentYear = date('Y');
+                $q->where(function ($query) use ($ageMin, $ageMax, $currentYear) {
+                    if ($ageMin) {
+                        $maxBirthYear = $currentYear - $ageMin;
+                        $query->where(function ($q) use ($maxBirthYear) {
+                            $q->whereRaw('(CAST(JSON_EXTRACT(data, "$.birth_year") AS UNSIGNED) <= ? AND JSON_EXTRACT(data, "$.birth_year") IS NOT NULL)', [$maxBirthYear])
+                                ->orWhereRaw('(CAST(JSON_EXTRACT(data, "$.birthYear") AS UNSIGNED) <= ? AND JSON_EXTRACT(data, "$.birthYear") IS NOT NULL)', [$maxBirthYear])
+                                ->orWhereRaw('(CAST(JSON_EXTRACT(data, "$.year_of_birth") AS UNSIGNED) <= ? AND JSON_EXTRACT(data, "$.year_of_birth") IS NOT NULL)', [$maxBirthYear])
+                                ->orWhereRaw('(YEAR(STR_TO_DATE(JSON_UNQUOTE(JSON_EXTRACT(data, "$.bday")), "%Y-%m-%d")) <= ? AND JSON_EXTRACT(data, "$.bday") IS NOT NULL)', [$maxBirthYear])
+                                ->orWhereRaw('(YEAR(STR_TO_DATE(JSON_UNQUOTE(JSON_EXTRACT(data, "$.birthday")), "%Y-%m-%d")) <= ? AND JSON_EXTRACT(data, "$.birthday") IS NOT NULL)', [$maxBirthYear]);
+                        });
+                    }
+                    if ($ageMax) {
+                        $minBirthYear = $currentYear - $ageMax;
+                        $query->where(function ($q) use ($minBirthYear) {
+                            $q->whereRaw('(CAST(JSON_EXTRACT(data, "$.birth_year") AS UNSIGNED) >= ? AND JSON_EXTRACT(data, "$.birth_year") IS NOT NULL)', [$minBirthYear])
+                                ->orWhereRaw('(CAST(JSON_EXTRACT(data, "$.birthYear") AS UNSIGNED) >= ? AND JSON_EXTRACT(data, "$.birthYear") IS NOT NULL)', [$minBirthYear])
+                                ->orWhereRaw('(CAST(JSON_EXTRACT(data, "$.year_of_birth") AS UNSIGNED) >= ? AND JSON_EXTRACT(data, "$.year_of_birth") IS NOT NULL)', [$minBirthYear])
+                                ->orWhereRaw('(YEAR(STR_TO_DATE(JSON_UNQUOTE(JSON_EXTRACT(data, "$.bday")), "%Y-%m-%d")) >= ? AND JSON_EXTRACT(data, "$.bday") IS NOT NULL)', [$minBirthYear])
+                                ->orWhereRaw('(YEAR(STR_TO_DATE(JSON_UNQUOTE(JSON_EXTRACT(data, "$.birthday")), "%Y-%m-%d")) >= ? AND JSON_EXTRACT(data, "$.birthday") IS NOT NULL)', [$minBirthYear]);
+                        });
+                    }
+                });
+            })
+            ->when($zipCode, function ($q, $zipCode) {
+                $q->where(function ($query) use ($zipCode) {
+                    $query->whereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.zip")) LIKE ?', ["%{$zipCode}%"])
+                        ->orWhereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.zip_code")) LIKE ?', ["%{$zipCode}%"])
+                        ->orWhereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.postal_code")) LIKE ?', ["%{$zipCode}%"])
+                        ->orWhereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.plz")) LIKE ?', ["%{$zipCode}%"]);
+                });
+            })
+            ->when($plzFrom || $plzTo, function ($q) use ($plzFrom, $plzTo) {
+                $from = $plzFrom !== null ? (int) preg_replace('/\\D+/', '', (string) $plzFrom) : null;
+                $to = $plzTo !== null ? (int) preg_replace('/\\D+/', '', (string) $plzTo) : null;
+                if (!$from && !$to) return;
+
+                $q->where(function ($query) use ($from, $to) {
+                    $expr = 'CAST(JSON_UNQUOTE(JSON_EXTRACT(data, "$.%s")) AS UNSIGNED)';
+                    $keys = ['plz', 'zip', 'zip_code', 'postal_code'];
+                    foreach ($keys as $i => $key) {
+                        $col = sprintf($expr, $key);
+                        $cb = function ($sub) use ($col, $from, $to) {
+                            if ($from && $to) $sub->whereRaw("$col BETWEEN ? AND ?", [$from, $to]);
+                            elseif ($from) $sub->whereRaw("$col >= ?", [$from]);
+                            elseif ($to) $sub->whereRaw("$col <= ?", [$to]);
+                        };
+                        if ($i === 0) $query->where(fn ($sub) => $cb($sub));
+                        else $query->orWhere(fn ($sub) => $cb($sub));
+                    }
+                });
+            })
+            ->when($city, function ($q, $city) {
+                $q->where(function ($query) use ($city) {
+                    $query->whereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.city")) LIKE ?', ["%{$city}%"])
+                        ->orWhereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.place")) LIKE ?', ["%{$city}%"])
+                        ->orWhereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.location")) LIKE ?', ["%{$city}%"]);
+                });
+            })
+            ->when($gender, function ($q) use ($gender) {
+                $q->where(function ($query) use ($gender) {
+                    $genderMap = [
+                        'm' => ['m', 'male', 'M', 'Male', 'MALE', 'masculine'],
+                        'f' => ['f', 'female', 'F', 'Female', 'FEMALE', 'feminine'],
+                        'd' => ['d', 'diverse', 'D', 'Diverse', 'DIVERSE', 'other'],
+                    ];
+                    $searchValues = $genderMap[strtolower($gender)] ?? [strtolower($gender)];
+                    $first = true;
+                    foreach ($searchValues as $value) {
+                        if ($first) {
+                            $query->where(function ($q) use ($value) {
+                                $q->whereRaw('LOWER(JSON_UNQUOTE(JSON_EXTRACT(data, "$.gender"))) = ?', [strtolower($value)])
+                                    ->orWhereRaw('LOWER(JSON_UNQUOTE(JSON_EXTRACT(data, "$.sex"))) = ?', [strtolower($value)])
+                                    ->orWhereRaw('LOWER(JSON_UNQUOTE(JSON_EXTRACT(data, "$.gender"))) LIKE ?', ["%" . strtolower($value) . "%"])
+                                    ->orWhereRaw('LOWER(JSON_UNQUOTE(JSON_EXTRACT(data, "$.sex"))) LIKE ?', ["%" . strtolower($value) . "%"]);
+                            });
+                            $first = false;
+                        } else {
+                            $query->orWhere(function ($q) use ($value) {
+                                $q->whereRaw('LOWER(JSON_UNQUOTE(JSON_EXTRACT(data, "$.gender"))) = ?', [strtolower($value)])
+                                    ->orWhereRaw('LOWER(JSON_UNQUOTE(JSON_EXTRACT(data, "$.sex"))) = ?', [strtolower($value)])
+                                    ->orWhereRaw('LOWER(JSON_UNQUOTE(JSON_EXTRACT(data, "$.gender"))) LIKE ?', ["%" . strtolower($value) . "%"])
+                                    ->orWhereRaw('LOWER(JSON_UNQUOTE(JSON_EXTRACT(data, "$.sex"))) LIKE ?', ["%" . strtolower($value) . "%"]);
+                            });
+                        }
+                    }
+                });
+            })
+            ->when($radius && $radiusLat !== null && $radiusLng !== null, function ($q) use ($radius, $radiusLat, $radiusLng) {
+                $q->whereRaw('(
+                    JSON_EXTRACT(data, "$.latitude") IS NOT NULL AND
+                    JSON_EXTRACT(data, "$.longitude") IS NOT NULL AND
+                    6371 * acos(
+                        cos(radians(?)) * 
+                        cos(radians(CAST(JSON_EXTRACT(data, "$.latitude") AS DECIMAL(10,8)))) * 
+                        cos(radians(CAST(JSON_EXTRACT(data, "$.longitude") AS DECIMAL(10,8))) - radians(?)) + 
+                        sin(radians(?)) * 
+                        sin(radians(CAST(JSON_EXTRACT(data, "$.latitude") AS DECIMAL(10,8))))
+                    )
+                ) <= ?', [$radiusLat, $radiusLng, $radiusLat, $radius]);
+            });
+
+        if ($status === 'read') {
+            $query->readByUser(auth()->id());
+        } elseif ($status === 'unread') {
+            $query->unreadByUser(auth()->id());
+        } elseif ($status === 'starred') {
+            $query->whereHas('marks', function ($q) {
+                $q->where('user_id', auth()->id());
+            });
+        }
+
+        return $query;
+    }
+
     /**
      * Show the public contact form.
      */
@@ -96,7 +358,8 @@ class ContactController extends Controller
                 'submission_form' => $submissionForm,
                 'station' => $station,
                 'data' => $data,
-                'ip_address' => $request->ip(),
+                'ip_hash' => $this->hashIp($request->ip()),
+                'dedupe_hash' => $this->computeDedupeHash($data),
             ]);
 
             // Detect new fields if webform_id exists (for field detection tracking)
@@ -121,6 +384,75 @@ class ContactController extends Controller
                 'error' => config('app.debug') ? $e->getMessage() : null
             ], 500);
         }
+    }
+
+    /**
+     * Compute a stable duplicate-detection hash for a submission.
+     * Criteria: email + phone + name (fname+lname / name) + PLZ + birth year.
+     */
+    private function computeDedupeHash(array $data): ?string
+    {
+        $key = (string) config('app.key', '');
+        $key = preg_replace('/^base64:/', '', $key);
+        $secret = base64_decode($key, true) ?: $key;
+        if (!is_string($secret) || $secret === '') return null;
+
+        $aliases = [
+            'email'      => ['email', 'email_address', 'e_mail'],
+            'phone'      => ['phone', 'phone_number', 'tel', 'telephone', 'mobile'],
+            'first_name' => ['fname', 'first_name', 'vorname'],
+            'last_name'  => ['lname', 'last_name', 'nachname'],
+            'name'       => ['name', 'full_name', 'contact_name'],
+            'plz'        => ['plz', 'zip', 'zip_code', 'postal_code'],
+            'birth_year' => ['birth_year', 'birthYear', 'year_of_birth', 'geburtstag', 'birthday', 'dob', 'date_of_birth'],
+        ];
+
+        $parts = [];
+        foreach ($aliases as $canonical => $keys) {
+            $value = null;
+            foreach ($keys as $k) {
+                $v = $data[$k] ?? null;
+                if ($v !== null && $v !== '') {
+                    $value = strtolower(trim((string) $v));
+                    break;
+                }
+            }
+            if ($canonical === 'birth_year' && $value !== null && strlen($value) > 4) {
+                if (preg_match('/(\d{4})/', $value, $m)) {
+                    $value = $m[1];
+                }
+            }
+            $parts[$canonical] = $value ?? '';
+        }
+
+        if (isset($parts['phone']) && $parts['phone'] !== '') {
+            $parts['phone'] = preg_replace('/\D/', '', $parts['phone']);
+        }
+
+        $payload = implode('|', [
+            $parts['email'],
+            $parts['phone'],
+            trim($parts['first_name'] . ' ' . $parts['last_name'] . ' ' . $parts['name']),
+            $parts['plz'],
+            $parts['birth_year'],
+        ]);
+
+        return hash_hmac('sha256', $payload, $secret);
+    }
+
+    private function hashIp(?string $ip): ?string
+    {
+        $ip = $ip ? trim($ip) : '';
+        if ($ip === '') return null;
+
+        $key = (string) config('app.key', '');
+        if ($key === '') return null;
+
+        $key = preg_replace('/^base64:/', '', $key);
+        $secret = base64_decode($key, true) ?: $key;
+        if (!is_string($secret) || $secret === '') return null;
+
+        return hash_hmac('sha256', $ip, $secret);
     }
 
     /**
@@ -228,7 +560,7 @@ class ContactController extends Controller
             if (is_array($data)) {
                 foreach ($data as $key => $value) {
                     // Skip system fields that are stored separately
-                    if (in_array($key, ['webform_id', 'submission_form', 'station', 'category'])) {
+                    if (in_array($key, ['webform_id', 'submission_form', 'station', 'category', 'latitude', 'longitude'])) {
                         continue;
                     }
 
@@ -298,7 +630,7 @@ class ContactController extends Controller
         $newFields = [];
         foreach (array_keys($newData) as $key) {
             // Skip system fields
-            if (in_array($key, ['webform_id', 'submission_form', 'station', 'category'])) {
+            if (in_array($key, ['webform_id', 'submission_form', 'station', 'category', 'latitude', 'longitude'])) {
                 continue;
             }
 
@@ -420,216 +752,56 @@ class ContactController extends Controller
         $birthYearMin = $request->get('birth_year_min');
         $birthYearMax = $request->get('birth_year_max');
         $zipCode = $request->get('zip_code');
+        $plzFrom = $request->get('plz_from');
+        $plzTo = $request->get('plz_to');
         $city = $request->get('city');
         $gender = $request->get('gender');
         $radius = $request->get('radius');
-        $radiusLat = $request->get('radius_lat');
-        $radiusLng = $request->get('radius_lng');
+        $radiusPlz = $request->get('radius_plz');
         $sortColumn = $request->get('sort_column', 'created_at');
         $sortDirection = $request->get('sort_direction', 'desc');
 
-        // Query submissions for this webform_id
-        // Composite index (webform_id, created_at) will be used for efficient sorting
-        $query = ContactSubmission::with(['readsWithUsers'])
-            ->where('webform_id', $webformId)
-            ->when($search, function ($q, $search) {
-                $q->where(function ($query) use ($search) {
-                    // Search in name fields (multiple variations) - use JSON_UNQUOTE to remove quotes
-                    $query->whereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.name")) LIKE ?', ["%{$search}%"])
-                        ->orWhereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.fname")) LIKE ?', ["%{$search}%"])
-                        ->orWhereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.lname")) LIKE ?', ["%{$search}%"])
-                        ->orWhereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.first_name")) LIKE ?', ["%{$search}%"])
-                        ->orWhereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.last_name")) LIKE ?', ["%{$search}%"])
-                        ->orWhereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.full_name")) LIKE ?', ["%{$search}%"])
-                        // Search in email
-                        ->orWhereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.email")) LIKE ?', ["%{$search}%"])
-                        // Search in message fields
-                        ->orWhereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.description")) LIKE ?', ["%{$search}%"])
-                        ->orWhereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.message")) LIKE ?', ["%{$search}%"])
-                        ->orWhereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.message_long")) LIKE ?', ["%{$search}%"])
-                        ->orWhereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.message_short")) LIKE ?', ["%{$search}%"])
-                        // Search in other common fields
-                        ->orWhereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.phone")) LIKE ?', ["%{$search}%"])
-                        ->orWhereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.city")) LIKE ?', ["%{$search}%"])
-                        ->orWhereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.zip")) LIKE ?', ["%{$search}%"])
-                        // Fallback: search entire JSON
-                        ->orWhereRaw('CAST(data AS CHAR) LIKE ?', ["%{$search}%"]);
-                });
-            })
-            // Date range filter
-            ->when($dateFrom, function ($q, $dateFrom) {
-                $q->whereDate('created_at', '>=', $dateFrom);
-            })
-            ->when($dateTo, function ($q, $dateTo) {
-                $q->whereDate('created_at', '<=', $dateTo);
-            })
-            // Age range filter (calculate from birth year or birthday date)
-            ->when($birthYearMin || $birthYearMax, function ($q) use ($birthYearMin, $birthYearMax) {
-                $q->where(function ($query) use ($birthYearMin, $birthYearMax) {
-                    // Check birth_year fields (if year is stored directly) OR extract from date fields
-                    if ($birthYearMin && $birthYearMax) {
-                        // Both min and max - need to match either field type within range
-                        $query->where(function ($q) use ($birthYearMin, $birthYearMax) {
-                            // Year fields
-                            $q->where(function ($subQ) use ($birthYearMin, $birthYearMax) {
-                                $subQ->whereRaw('CAST(JSON_EXTRACT(data, "$.birth_year") AS UNSIGNED) BETWEEN ? AND ?', [$birthYearMin, $birthYearMax])
-                                    ->orWhereRaw('CAST(JSON_EXTRACT(data, "$.birthYear") AS UNSIGNED) BETWEEN ? AND ?', [$birthYearMin, $birthYearMax])
-                                    ->orWhereRaw('CAST(JSON_EXTRACT(data, "$.year_of_birth") AS UNSIGNED) BETWEEN ? AND ?', [$birthYearMin, $birthYearMax]);
-                            })
-                                // Date fields - extract year
-                                ->orWhere(function ($subQ) use ($birthYearMin, $birthYearMax) {
-                                    $subQ->whereRaw('YEAR(STR_TO_DATE(JSON_UNQUOTE(JSON_EXTRACT(data, "$.bday")), "%Y-%m-%d")) BETWEEN ? AND ?', [$birthYearMin, $birthYearMax])
-                                        ->orWhereRaw('YEAR(STR_TO_DATE(JSON_UNQUOTE(JSON_EXTRACT(data, "$.birthday")), "%Y-%m-%d")) BETWEEN ? AND ?', [$birthYearMin, $birthYearMax]);
-                                });
-                        });
-                    } else {
-                        // Only min or only max
-                        if ($birthYearMin) {
-                            $query->where(function ($q) use ($birthYearMin) {
-                                $q->whereRaw('CAST(JSON_EXTRACT(data, "$.birth_year") AS UNSIGNED) >= ?', [$birthYearMin])
-                                    ->orWhereRaw('CAST(JSON_EXTRACT(data, "$.birthYear") AS UNSIGNED) >= ?', [$birthYearMin])
-                                    ->orWhereRaw('CAST(JSON_EXTRACT(data, "$.year_of_birth") AS UNSIGNED) >= ?', [$birthYearMin])
-                                    ->orWhereRaw('YEAR(STR_TO_DATE(JSON_UNQUOTE(JSON_EXTRACT(data, "$.bday")), "%Y-%m-%d")) >= ?', [$birthYearMin])
-                                    ->orWhereRaw('YEAR(STR_TO_DATE(JSON_UNQUOTE(JSON_EXTRACT(data, "$.birthday")), "%Y-%m-%d")) >= ?', [$birthYearMin]);
-                            });
-                        }
-                        if ($birthYearMax) {
-                            $query->where(function ($q) use ($birthYearMax) {
-                                $q->whereRaw('CAST(JSON_EXTRACT(data, "$.birth_year") AS UNSIGNED) <= ?', [$birthYearMax])
-                                    ->orWhereRaw('CAST(JSON_EXTRACT(data, "$.birthYear") AS UNSIGNED) <= ?', [$birthYearMax])
-                                    ->orWhereRaw('CAST(JSON_EXTRACT(data, "$.year_of_birth") AS UNSIGNED) <= ?', [$birthYearMax])
-                                    ->orWhereRaw('YEAR(STR_TO_DATE(JSON_UNQUOTE(JSON_EXTRACT(data, "$.bday")), "%Y-%m-%d")) <= ?', [$birthYearMax])
-                                    ->orWhereRaw('YEAR(STR_TO_DATE(JSON_UNQUOTE(JSON_EXTRACT(data, "$.birthday")), "%Y-%m-%d")) <= ?', [$birthYearMax]);
-                            });
-                        }
-                    }
-                });
-            })
-            // Age range filter (if age is directly provided - calculate from birthday dates)
-            ->when($ageMin || $ageMax, function ($q) use ($ageMin, $ageMax) {
-                $currentYear = date('Y');
-                $q->where(function ($query) use ($ageMin, $ageMax, $currentYear) {
-                    // Apply age min (person must be at least this old = birth year must be <= max birth year)
-                    if ($ageMin) {
-                        $maxBirthYear = $currentYear - $ageMin;
-                        $query->where(function ($q) use ($maxBirthYear) {
-                            $q->whereRaw('(CAST(JSON_EXTRACT(data, "$.birth_year") AS UNSIGNED) <= ? AND JSON_EXTRACT(data, "$.birth_year") IS NOT NULL)', [$maxBirthYear])
-                                ->orWhereRaw('(CAST(JSON_EXTRACT(data, "$.birthYear") AS UNSIGNED) <= ? AND JSON_EXTRACT(data, "$.birthYear") IS NOT NULL)', [$maxBirthYear])
-                                ->orWhereRaw('(CAST(JSON_EXTRACT(data, "$.year_of_birth") AS UNSIGNED) <= ? AND JSON_EXTRACT(data, "$.year_of_birth") IS NOT NULL)', [$maxBirthYear])
-                                ->orWhereRaw('(YEAR(STR_TO_DATE(JSON_UNQUOTE(JSON_EXTRACT(data, "$.bday")), "%Y-%m-%d")) <= ? AND JSON_EXTRACT(data, "$.bday") IS NOT NULL)', [$maxBirthYear])
-                                ->orWhereRaw('(YEAR(STR_TO_DATE(JSON_UNQUOTE(JSON_EXTRACT(data, "$.birthday")), "%Y-%m-%d")) <= ? AND JSON_EXTRACT(data, "$.birthday") IS NOT NULL)', [$maxBirthYear]);
-                        });
-                    }
+        $hideDuplicates = (bool) $request->get('hide_duplicates', false);
 
-                    // Apply age max (person must be at most this old = birth year must be >= min birth year)
-                    if ($ageMax) {
-                        $minBirthYear = $currentYear - $ageMax;
-                        $query->where(function ($q) use ($minBirthYear) {
-                            $q->whereRaw('(CAST(JSON_EXTRACT(data, "$.birth_year") AS UNSIGNED) >= ? AND JSON_EXTRACT(data, "$.birth_year") IS NOT NULL)', [$minBirthYear])
-                                ->orWhereRaw('(CAST(JSON_EXTRACT(data, "$.birthYear") AS UNSIGNED) >= ? AND JSON_EXTRACT(data, "$.birthYear") IS NOT NULL)', [$minBirthYear])
-                                ->orWhereRaw('(CAST(JSON_EXTRACT(data, "$.year_of_birth") AS UNSIGNED) >= ? AND JSON_EXTRACT(data, "$.year_of_birth") IS NOT NULL)', [$minBirthYear])
-                                ->orWhereRaw('(YEAR(STR_TO_DATE(JSON_UNQUOTE(JSON_EXTRACT(data, "$.bday")), "%Y-%m-%d")) >= ? AND JSON_EXTRACT(data, "$.bday") IS NOT NULL)', [$minBirthYear])
-                                ->orWhereRaw('(YEAR(STR_TO_DATE(JSON_UNQUOTE(JSON_EXTRACT(data, "$.birthday")), "%Y-%m-%d")) >= ? AND JSON_EXTRACT(data, "$.birthday") IS NOT NULL)', [$minBirthYear]);
-                        });
-                    }
-                });
-            })
-            // ZIP code filter
-            ->when($zipCode, function ($q, $zipCode) {
-                $q->where(function ($query) use ($zipCode) {
-                    $query->whereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.zip")) LIKE ?', ["%{$zipCode}%"])
-                        ->orWhereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.zip_code")) LIKE ?', ["%{$zipCode}%"])
-                        ->orWhereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.postal_code")) LIKE ?', ["%{$zipCode}%"])
-                        ->orWhereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.plz")) LIKE ?', ["%{$zipCode}%"]);
-                });
-            })
-            // City filter
-            ->when($city, function ($q, $city) {
-                $q->where(function ($query) use ($city) {
-                    $query->whereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.city")) LIKE ?', ["%{$city}%"])
-                        ->orWhereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.place")) LIKE ?', ["%{$city}%"])
-                        ->orWhereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.location")) LIKE ?', ["%{$city}%"]);
-                });
-            })
-            // Gender filter
-            ->when($gender, function ($q, $gender) {
-                $q->where(function ($query) use ($gender) {
-                    // Handle various gender formats - map filter value to possible data values
-                    $genderMap = [
-                        'm' => ['m', 'male', 'M', 'Male', 'MALE', 'masculine'],
-                        'f' => ['f', 'female', 'F', 'Female', 'FEMALE', 'feminine'],
-                        'd' => ['d', 'diverse', 'D', 'Diverse', 'DIVERSE', 'other'],
-                    ];
+        $query = $this->buildFormDetailQuery($webformId, $request);
 
-                    $searchValues = $genderMap[strtolower($gender)] ?? [strtolower($gender)];
+        // When hide_duplicates is active, keep only the earliest (min id) per dedupe_hash.
+        // Rows with a NULL dedupe_hash are always shown individually.
+        if ($hideDuplicates) {
+            $representativeIds = \DB::table('contact_submissions')
+                ->select(\DB::raw('MIN(id) as rep_id'))
+                ->where('webform_id', $webformId)
+                ->whereNotNull('dedupe_hash')
+                ->groupBy('dedupe_hash')
+                ->pluck('rep_id');
 
-                    // Build query for each possible value - use case-insensitive matching with JSON_UNQUOTE
-                    $first = true;
-                    foreach ($searchValues as $value) {
-                        if ($first) {
-                            $query->where(function ($q) use ($value) {
-                                $q->whereRaw('LOWER(JSON_UNQUOTE(JSON_EXTRACT(data, "$.gender"))) = ?', [strtolower($value)])
-                                    ->orWhereRaw('LOWER(JSON_UNQUOTE(JSON_EXTRACT(data, "$.sex"))) = ?', [strtolower($value)])
-                                    ->orWhereRaw('LOWER(JSON_UNQUOTE(JSON_EXTRACT(data, "$.gender"))) LIKE ?', ["%" . strtolower($value) . "%"])
-                                    ->orWhereRaw('LOWER(JSON_UNQUOTE(JSON_EXTRACT(data, "$.sex"))) LIKE ?', ["%" . strtolower($value) . "%"]);
-                            });
-                            $first = false;
-                        } else {
-                            $query->orWhere(function ($q) use ($value) {
-                                $q->whereRaw('LOWER(JSON_UNQUOTE(JSON_EXTRACT(data, "$.gender"))) = ?', [strtolower($value)])
-                                    ->orWhereRaw('LOWER(JSON_UNQUOTE(JSON_EXTRACT(data, "$.sex"))) = ?', [strtolower($value)])
-                                    ->orWhereRaw('LOWER(JSON_UNQUOTE(JSON_EXTRACT(data, "$.gender"))) LIKE ?', ["%" . strtolower($value) . "%"])
-                                    ->orWhereRaw('LOWER(JSON_UNQUOTE(JSON_EXTRACT(data, "$.sex"))) LIKE ?', ["%" . strtolower($value) . "%"]);
-                            });
-                        }
-                    }
-                });
-            })
-            // Radius/distance filter (if coordinates provided)
-            ->when($radius && $radiusLat && $radiusLng, function ($q) use ($radius, $radiusLat, $radiusLng) {
-                // Using Haversine formula for distance calculation
-                // This requires latitude and longitude in the JSON data
-                $q->whereRaw('(
-                    JSON_EXTRACT(data, "$.latitude") IS NOT NULL AND
-                    JSON_EXTRACT(data, "$.longitude") IS NOT NULL AND
-                    6371 * acos(
-                        cos(radians(?)) * 
-                        cos(radians(CAST(JSON_EXTRACT(data, "$.latitude") AS DECIMAL(10,8)))) * 
-                        cos(radians(CAST(JSON_EXTRACT(data, "$.longitude") AS DECIMAL(10,8))) - radians(?)) + 
-                        sin(radians(?)) * 
-                        sin(radians(CAST(JSON_EXTRACT(data, "$.latitude") AS DECIMAL(10,8))))
-                    )
-                ) <= ?', [$radiusLat, $radiusLng, $radiusLat, $radius]);
+            // Also include rows with NULL dedupe_hash (they are always unique)
+            $query->where(function ($q) use ($representativeIds) {
+                $q->whereIn('id', $representativeIds)
+                  ->orWhereNull('dedupe_hash');
             });
-
-        // Filter by read status for current user
-        if ($status === 'read') {
-            $query->readByUser(auth()->id());
-        } elseif ($status === 'unread') {
-            $query->unreadByUser(auth()->id());
         }
 
-        // Debug: Log the SQL query
-        \Log::info('Filter Query SQL: ' . $query->toSql());
-        \Log::info('Filter Query Bindings: ' . json_encode($query->getBindings()));
-        \Log::info('Filter Parameters: ' . json_encode([
-            'search' => $search,
-            'status' => $status,
-            'date_from' => $dateFrom,
-            'date_to' => $dateTo,
-            'age_min' => $ageMin,
-            'age_max' => $ageMax,
-            'birth_year_min' => $birthYearMin,
-            'birth_year_max' => $birthYearMax,
-            'zip_code' => $zipCode,
-            'city' => $city,
-            'gender' => $gender,
-            'radius' => $radius,
-        ]));
-
         // Use composite index (webform_id, created_at) for efficient sorting
-        // This prevents "Out of sort memory" errors by using the index for sorting
         $submissions = $query->orderBy($sortColumn, $sortDirection)->paginate(15)->withQueryString();
+
+        // Attach duplicate_count to each row
+        $hashes = $submissions->pluck('dedupe_hash')->filter()->unique()->values()->all();
+        $countMap = [];
+        if (!empty($hashes)) {
+            $countMap = \DB::table('contact_submissions')
+                ->select('dedupe_hash', \DB::raw('COUNT(*) as total'))
+                ->where('webform_id', $webformId)
+                ->whereIn('dedupe_hash', $hashes)
+                ->groupBy('dedupe_hash')
+                ->pluck('total', 'dedupe_hash')
+                ->all();
+        }
+        // Transform paginator items to include duplicate_count
+        $submissions->getCollection()->transform(function ($item) use ($countMap) {
+            $item->duplicate_count = $item->dedupe_hash ? (int) ($countMap[$item->dedupe_hash] ?? 1) : 1;
+            return $item;
+        });
 
         // Get total count for this webform
         $totalCount = ContactSubmission::where('webform_id', $webformId)->count();
@@ -670,14 +842,137 @@ class ContactController extends Controller
                 'birth_year_min' => $birthYearMin,
                 'birth_year_max' => $birthYearMax,
                 'zip_code' => $zipCode,
+                'plz_from' => $plzFrom,
+                'plz_to' => $plzTo,
                 'city' => $city,
                 'gender' => $gender,
                 'radius' => $radius,
-                'radius_lat' => $radiusLat,
-                'radius_lng' => $radiusLng,
+                'radius_plz' => $radiusPlz,
+                'hide_duplicates' => $hideDuplicates,
             ],
             'sortColumn' => $sortColumn,
             'sortDirection' => $sortDirection,
+            'retentionDays' => ContactRetentionRule::effectiveDaysFor($webformId),
+        ]);
+    }
+
+    public function getRetentionRule(string $webformId): JsonResponse
+    {
+        $rule = ContactRetentionRule::where('webform_id', $webformId)->first();
+        $globalRule = ContactRetentionRule::whereNull('webform_id')->first();
+
+        return response()->json([
+            'webform_id' => $webformId,
+            'retention_days' => $rule?->retention_days,
+            'notes' => $rule?->notes,
+            'global_retention_days' => $globalRule?->retention_days,
+            'effective_days' => ContactRetentionRule::effectiveDaysFor($webformId),
+        ]);
+    }
+
+    public function saveRetentionRule(Request $request, string $webformId): JsonResponse
+    {
+        $validated = $request->validate([
+            'retention_days' => 'nullable|integer|min:1|max:3650',
+            'notes' => 'nullable|string|max:500',
+        ]);
+
+        $rule = ContactRetentionRule::updateOrCreate(
+            ['webform_id' => $webformId],
+            [
+                'retention_days' => $validated['retention_days'] ?? null,
+                'notes' => $validated['notes'] ?? null,
+            ]
+        );
+
+        return response()->json([
+            'success' => true,
+            'retention_days' => $rule->retention_days,
+            'notes' => $rule->notes,
+        ]);
+    }
+
+    public function exportFormSubmissions(Request $request, string $webformId)
+    {
+        $format = strtolower((string) $request->get('format', 'csv'));
+        $ids = $request->input('ids');
+        $ids = is_array($ids) ? array_values(array_filter($ids, fn ($v) => is_numeric($v))) : [];
+
+        $sortColumn = $request->get('sort_column', 'created_at');
+        $sortDirection = $request->get('sort_direction', 'desc');
+
+        $query = $this->buildFormDetailQuery($webformId, $request)
+            ->when(!empty($ids), fn ($q) => $q->whereIn('id', $ids))
+            ->orderBy($sortColumn, $sortDirection);
+
+        // Canonical keys list from request (optional); defaults to visible fields.
+        $fields = $request->input('fields');
+        $fields = is_array($fields)
+            ? array_values(array_filter($fields, fn ($v) => is_string($v) && trim($v) !== ''))
+            : [];
+
+        if (empty($fields)) {
+            $fields = ['first_name', 'last_name', 'email', 'phone', 'postal_code'];
+        }
+
+        $safeName = Str::slug("form-{$webformId}");
+        $timestamp = now()->format('Ymd_His');
+        $ext = $format === 'xlsx' ? 'xlsx' : 'csv';
+        $filename = "{$safeName}_{$timestamp}.{$ext}";
+
+        if ($format === 'xlsx') {
+            if (!class_exists(\Box\Spout\Writer\Common\Creator\WriterEntityFactory::class)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'XLSX export dependency is not installed.',
+                ], 500);
+            }
+
+            $tmp = tempnam(sys_get_temp_dir(), 'xlsx_export_') . '.xlsx';
+            $writer = \Box\Spout\Writer\Common\Creator\WriterEntityFactory::createXLSXWriter();
+            $writer->openToFile($tmp);
+
+            $header = array_merge(['ID', 'Submitted At'], array_map(fn ($f) => $this->getFieldLabel($f), $fields));
+            $writer->addRow(\Box\Spout\Writer\Common\Creator\WriterEntityFactory::createRowFromArray($header));
+
+            $query->chunk(500, function ($rows) use ($writer, $fields) {
+                foreach ($rows as $submission) {
+                    $data = is_array($submission->data) ? $submission->data : [];
+                    $row = [
+                        $submission->id,
+                        optional($submission->created_at)->toDateTimeString(),
+                    ];
+                    foreach ($fields as $f) {
+                        $row[] = $this->resolveExportValue($data, (string) $f);
+                    }
+                    $writer->addRow(\Box\Spout\Writer\Common\Creator\WriterEntityFactory::createRowFromArray($row));
+                }
+            });
+
+            $writer->close();
+
+            return response()->download($tmp, $filename)->deleteFileAfterSend(true);
+        }
+
+        return response()->streamDownload(function () use ($query, $fields) {
+            $out = fopen('php://output', 'w');
+            fputcsv($out, array_merge(['id', 'submitted_at'], $fields));
+            $query->chunk(500, function ($rows) use ($out, $fields) {
+                foreach ($rows as $submission) {
+                    $data = is_array($submission->data) ? $submission->data : [];
+                    $row = [
+                        $submission->id,
+                        optional($submission->created_at)->toDateTimeString(),
+                    ];
+                    foreach ($fields as $f) {
+                        $row[] = $this->resolveExportValue($data, (string) $f);
+                    }
+                    fputcsv($out, $row);
+                }
+            });
+            fclose($out);
+        }, $filename, [
+            'Content-Type' => 'text/csv; charset=UTF-8',
         ]);
     }
 
@@ -690,8 +985,13 @@ class ContactController extends Controller
         // This is idempotent because markAsReadBy uses firstOrCreate.
         $submission->markAsReadBy(auth()->id());
 
-        // Load with reads and users so the frontend knows the current state.
-        $submission->load(['readsWithUsers']);
+        // Load with reads + current user's mark state so the frontend knows the current state.
+        $submission->load([
+            'readsWithUsers',
+            'marks' => function ($q) {
+                $q->where('user_id', auth()->id());
+            },
+        ]);
 
         // Detect available fields - Form-specific (from this submission's form)
         $formFields = $this->detectAvailableFields($submission->webform_id);
@@ -757,6 +1057,39 @@ class ContactController extends Controller
                         ],
                     ];
                 })->all(),
+            ]);
+        }
+
+        return back()->with('success', $message);
+    }
+
+    /**
+     * Mark/unmark (star) a submission for the current user.
+     */
+    public function toggleMark(Request $request, ContactSubmission $submission)
+    {
+        $userId = auth()->id();
+        $existing = $submission->marks()->where('user_id', $userId)->first();
+
+        if ($existing) {
+            $existing->delete();
+            $message = 'Unmarked';
+        } else {
+            $submission->markBy($userId);
+            $message = 'Marked';
+        }
+
+        $submission->load([
+            'marks' => function ($q) use ($userId) {
+                $q->where('user_id', $userId);
+            },
+        ]);
+
+        if ($request->expectsJson() || $request->ajax()) {
+            return response()->json([
+                'success' => true,
+                'message' => $message,
+                'marked' => $submission->marks->isNotEmpty(),
             ]);
         }
 

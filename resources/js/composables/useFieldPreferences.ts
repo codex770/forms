@@ -1,6 +1,10 @@
 import { ref, computed } from 'vue';
 import { router } from '@inertiajs/vue3';
 import type { FieldInfo } from '@/utils/fieldDetection';
+import {
+    resolveAliasedValue,
+    toCanonicalFieldKey,
+} from '@/utils/fieldAliases';
 
 interface Preference {
     id: number;
@@ -25,17 +29,38 @@ interface FieldPreferencesProps {
 export function useFieldPreferences(
     viewType: 'list' | 'detail',
     category: string | null = null,
-    smartDefaults: string[] = []
+    smartDefaults: string[] = [],
+    options: {
+        preferenceName?: string;
+    } = {},
 ) {
     const preferences = ref<Preference[]>([]);
     const loading = ref(false);
     const saving = ref(false);
-    const visibleFields = ref<Set<string>>(new Set());
+    const visibleFieldOrder = ref<string[]>([]);
     const inheritedFrom = ref<string | null>(null);
 
     const preferenceName = computed(() => {
-        return viewType === 'list' ? 'list-view-columns' : 'detail-view-layout';
+        return (
+            options.preferenceName ||
+            (viewType === 'list' ? 'list-view-columns' : 'detail-view-layout')
+        );
     });
+
+    const visibleFieldSet = computed(() => new Set(visibleFieldOrder.value));
+
+    const normalizeOrderedKeys = (keys: string[]) => {
+        const out: string[] = [];
+        const seen = new Set<string>();
+        for (const k of keys || []) {
+            const canonical = toCanonicalFieldKey(k);
+            if (!canonical) continue;
+            if (seen.has(canonical)) continue;
+            seen.add(canonical);
+            out.push(canonical);
+        }
+        return out;
+    };
 
     /**
      * Load preferences from API
@@ -65,7 +90,9 @@ export function useFieldPreferences(
                     const inheritedData = await inheritedResponse.json();
 
                     if (inheritedData.success && inheritedData.preference) {
-                        const savedFields = inheritedData.preference.visible_columns || [];
+                        const savedFieldsRaw =
+                            inheritedData.preference.visible_columns || [];
+                        const savedFields = normalizeOrderedKeys(savedFieldsRaw);
                         // Check if preference is "unreasonable" (has too many fields - likely accidental "select all")
                         // Reasonable threshold: smart defaults * 2, or max 10 fields
                         const maxReasonable = Math.max(smartDefaults.length * 2, 10);
@@ -75,25 +102,37 @@ export function useFieldPreferences(
                             console.log('Using smart defaults instead:', smartDefaults);
                             // Use smart defaults instead
                             if (smartDefaults.length > 0) {
-                                visibleFields.value = new Set(smartDefaults);
+                                visibleFieldOrder.value =
+                                    normalizeOrderedKeys(smartDefaults);
                             } else {
-                                visibleFields.value = new Set(['fname', 'lname', 'email', 'message_long']);
+                                visibleFieldOrder.value = normalizeOrderedKeys([
+                                    'first_name',
+                                    'last_name',
+                                    'email',
+                                    'message_long',
+                                ]);
                             }
                         } else {
                             // Use inherited preference (single default)
                             console.log('Loaded inherited preference:', savedFields);
-                            visibleFields.value = new Set(savedFields);
+                            visibleFieldOrder.value = savedFields;
                             inheritedFrom.value = inheritedData.inherited_from;
                         }
                     } else {
                         // No preference found - use smart defaults from backend
                         console.log('No preference found, using smart defaults:', smartDefaults);
                         if (smartDefaults.length > 0) {
-                            visibleFields.value = new Set(smartDefaults);
+                            visibleFieldOrder.value =
+                                normalizeOrderedKeys(smartDefaults);
                         } else {
                             // Fallback to hardcoded defaults
                             console.log('No smart defaults, using fallback');
-                            visibleFields.value = new Set(['fname', 'lname', 'email', 'message_long']);
+                            visibleFieldOrder.value = normalizeOrderedKeys([
+                                'first_name',
+                                'last_name',
+                                'email',
+                                'message_long',
+                            ]);
                         }
                     }
                 } else {
@@ -102,7 +141,8 @@ export function useFieldPreferences(
                     const defaultPref = prefs.find((p: Preference) => p.is_default);
                     
                     if (defaultPref) {
-                        const savedFields = defaultPref.visible_columns || [];
+                        const savedFieldsRaw = defaultPref.visible_columns || [];
+                        const savedFields = normalizeOrderedKeys(savedFieldsRaw);
                         // Check if preference is "unreasonable" (has too many fields)
                         const maxReasonable = Math.max(smartDefaults.length * 2, 10);
                         
@@ -110,19 +150,31 @@ export function useFieldPreferences(
                             console.warn(`⚠️ Ignoring unreasonable preference with ${savedFields.length} fields (max reasonable: ${maxReasonable})`);
                             // Use smart defaults instead
                             if (smartDefaults.length > 0) {
-                                visibleFields.value = new Set(smartDefaults);
+                                visibleFieldOrder.value =
+                                    normalizeOrderedKeys(smartDefaults);
                             } else {
-                                visibleFields.value = new Set(['fname', 'lname', 'email', 'message_long']);
+                                visibleFieldOrder.value = normalizeOrderedKeys([
+                                    'first_name',
+                                    'last_name',
+                                    'email',
+                                    'message_long',
+                                ]);
                             }
                         } else {
-                            visibleFields.value = new Set(savedFields);
+                            visibleFieldOrder.value = savedFields;
                         }
                     } else {
                         // No preference found - use smart defaults
                         if (smartDefaults.length > 0) {
-                            visibleFields.value = new Set(smartDefaults);
+                            visibleFieldOrder.value =
+                                normalizeOrderedKeys(smartDefaults);
                         } else {
-                            visibleFields.value = new Set(['fname', 'lname', 'email', 'message_long']);
+                            visibleFieldOrder.value = normalizeOrderedKeys([
+                                'first_name',
+                                'last_name',
+                                'email',
+                                'message_long',
+                            ]);
                         }
                     }
                 }
@@ -173,10 +225,12 @@ export function useFieldPreferences(
             // Default to TYPE level unless explicitly overridden
             const saveCategory = options.useFormLevel ? category : getDefaultCategory();
 
+            const ordered = normalizeOrderedKeys(fields);
+
             const payload = {
                 category: saveCategory,
                 preference_name: options.preferenceName || preferenceName.value,
-                visible_columns: fields,
+                visible_columns: ordered,
                 sort_config: options.sortConfig,
                 saved_filters: options.savedFilters,
                 is_default: options.asDefault || false,
@@ -199,6 +253,7 @@ export function useFieldPreferences(
             console.log('Network response data:', data);
 
             if (data.success) {
+                visibleFieldOrder.value = ordered;
                 // Don't reload preferences - visibleFields is already updated in the component
                 // Reloading would overwrite the user's current selection with server data
                 // The server has been updated, so we're in sync
@@ -234,16 +289,15 @@ export function useFieldPreferences(
             return value;
         }
 
-        return data[fieldName] ?? null;
+        return resolveAliasedValue(data, fieldName);
     };
 
     /**
      * Get human-readable label for a field
      */
     const getFieldLabel = (fieldName: string): string => {
+        const canonical = toCanonicalFieldKey(fieldName);
         const labels: Record<string, string> = {
-            'fname': 'First Name',
-            'lname': 'Last Name',
             'first_name': 'First Name',
             'last_name': 'Last Name',
             'name': 'Name',
@@ -255,7 +309,6 @@ export function useFieldPreferences(
             'message': 'Message',
             'description': 'Description',
             'city': 'City',
-            'zip': 'ZIP Code',
             'zip_code': 'ZIP Code',
             'postal_code': 'Postal Code',
             'plz': 'PLZ',
@@ -263,15 +316,14 @@ export function useFieldPreferences(
             'age': 'Age',
             'birth_year': 'Birth Year',
             'birthday': 'Birthday',
-            'bday': 'Birthday',
         };
 
-        if (labels[fieldName]) {
-            return labels[fieldName];
+        if (labels[canonical]) {
+            return labels[canonical];
         }
 
         // Convert snake_case or camelCase to Title Case
-        return fieldName
+        return canonical
             .replace(/[_-]/g, ' ')
             .replace(/([a-z])([A-Z])/g, '$1 $2')
             .split(' ')
@@ -284,13 +336,15 @@ export function useFieldPreferences(
      * Creates a new Set to ensure Vue reactivity detects the change
      */
     const toggleField = (fieldName: string) => {
-        const newSet = new Set(visibleFields.value);
-        if (newSet.has(fieldName)) {
-            newSet.delete(fieldName);
+        const key = toCanonicalFieldKey(fieldName);
+        const next = visibleFieldOrder.value.slice();
+        const idx = next.indexOf(key);
+        if (idx >= 0) {
+            next.splice(idx, 1);
         } else {
-            newSet.add(fieldName);
+            next.push(key);
         }
-        visibleFields.value = newSet; // Assign new Set to trigger reactivity
+        visibleFieldOrder.value = next;
     };
 
     /**
@@ -298,20 +352,31 @@ export function useFieldPreferences(
      * Creates a new Set to ensure Vue reactivity detects the change
      */
     const setAllFields = (fields: string[], visible: boolean) => {
-        const newSet = new Set(visibleFields.value);
         if (visible) {
-            fields.forEach(field => newSet.add(field));
+            visibleFieldOrder.value = normalizeOrderedKeys(fields);
         } else {
-            fields.forEach(field => newSet.delete(field));
+            visibleFieldOrder.value = [];
         }
-        visibleFields.value = newSet; // Assign new Set to trigger reactivity
+    };
+
+    const moveField = (fieldKey: string, toIndex: number) => {
+        const key = toCanonicalFieldKey(fieldKey);
+        const next = visibleFieldOrder.value.slice();
+        const fromIndex = next.indexOf(key);
+        if (fromIndex < 0) return;
+        const clamped = Math.max(0, Math.min(toIndex, next.length - 1));
+        if (fromIndex === clamped) return;
+        const [item] = next.splice(fromIndex, 1);
+        next.splice(clamped, 0, item);
+        visibleFieldOrder.value = next;
     };
 
     return {
         preferences,
         loading,
         saving,
-        visibleFields,
+        visibleFieldOrder,
+        visibleFieldSet,
         inheritedFrom,
         loadPreferences,
         savePreferences,
@@ -319,6 +384,7 @@ export function useFieldPreferences(
         getFieldLabel,
         toggleField,
         setAllFields,
+        moveField,
     };
 }
 

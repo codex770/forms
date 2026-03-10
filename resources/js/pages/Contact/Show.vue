@@ -26,6 +26,7 @@ import {
     filterOutTechnicalFields,
     isTechnicalFieldKey,
 } from '@/utils/technicalFields';
+import { dedupeFieldsByCanonicalKey, resolveAliasedValue } from '@/utils/fieldAliases';
 import { Head, Link, router, usePage } from '@inertiajs/vue3';
 import {
     AlertCircle,
@@ -36,9 +37,9 @@ import {
     Columns,
     Eye,
     EyeOff,
-    Globe,
     Mail,
     MessageSquare,
+    Star,
     Trash2,
 } from 'lucide-vue-next';
 import { computed, onMounted, ref } from 'vue';
@@ -52,7 +53,6 @@ interface ContactSubmission {
         description?: string;
         [key: string]: any;
     };
-    ip_address: string;
     created_at: string;
     updated_at: string;
     reads_with_users: Array<{
@@ -63,6 +63,11 @@ interface ContactSubmission {
             id: number;
             name: string;
         };
+    }>;
+    marks?: Array<{
+        id: number;
+        user_id: number;
+        marked_at: string;
     }>;
 }
 
@@ -110,10 +115,15 @@ const backButtonText = computed(() => {
 
 // Reactive reads list (so toggles can update UI without a full page reload)
 const reads = ref(props.submission.reads_with_users || []);
+const marked = ref(Boolean(props.submission.marks && props.submission.marks.length > 0));
 
 // Check if current user has read the submission
 const isReadByCurrentUser = computed((): boolean => {
     return reads.value.some((read) => read.user_id === authUser.value?.id);
+});
+
+const isMarkedByCurrentUser = computed((): boolean => {
+    return marked.value;
 });
 
 // Get initials for avatar - handles missing name gracefully
@@ -205,6 +215,64 @@ const toggleRead = async () => {
     }
 };
 
+const toggleMark = async () => {
+    try {
+        const data = await postJson(`/contact-messages/${props.submission.id}/toggle-mark`);
+        if (data && typeof data.marked === 'boolean') {
+            marked.value = data.marked;
+        } else {
+            marked.value = !marked.value;
+        }
+    } catch (error) {
+        console.error('Error toggling mark:', error);
+    }
+};
+
+const printSubmission = () => {
+    const rows = visibleDataFields.value.map(([key, value]) => {
+        return `<tr><th>${getFieldLabel(key)}</th><td>${String(value ?? '')}</td></tr>`;
+    }).join('');
+
+    const w = window.open('', '_blank');
+    if (!w) return;
+    w.document.write(`
+      <html>
+        <head>
+          <title>Print</title>
+          <style>
+            body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; padding: 16px; }
+            table { width: 100%; border-collapse: collapse; }
+            th, td { border: 1px solid #ddd; padding: 8px; font-size: 12px; vertical-align: top; }
+            th { background: #f5f5f5; width: 240px; text-align: left; }
+            .meta { color: #666; font-size: 12px; margin-bottom: 12px; }
+          </style>
+        </head>
+        <body>
+          <h2>Submission #${props.submission.id}</h2>
+          <div class="meta">Submitted ${new Date(props.submission.created_at).toLocaleString()}</div>
+          <table>
+            <tbody>${rows}</tbody>
+          </table>
+          <script>window.onload = () => { window.print(); }<\/script>
+        </body>
+      </html>
+    `);
+    w.document.close();
+};
+
+const forwardEmailHref = computed(() => {
+    const subject = encodeURIComponent(`Forward: Submission #${props.submission.id}`);
+    const lines: string[] = [];
+    lines.push(`Submission #${props.submission.id}`);
+    lines.push(`Submitted: ${new Date(props.submission.created_at).toLocaleString()}`);
+    lines.push('');
+    visibleDataFields.value.forEach(([key, value]) => {
+        lines.push(`${getFieldLabel(key)}: ${String(value ?? '')}`);
+    });
+    const body = encodeURIComponent(lines.join('\n'));
+    return `mailto:?subject=${subject}&body=${body}`;
+});
+
 // Delete submission
 const deleteSubmission = () => {
     if (
@@ -253,17 +321,20 @@ const categoryPath = computed(() => {
 // Field preferences composable for detail view
 // Pass smart defaults from backend for optimal first-time experience
 const {
-    visibleFields,
+    visibleFieldOrder,
+    visibleFieldSet,
     loadPreferences,
     savePreferences,
     getFieldValue,
     getFieldLabel,
     toggleField,
     setAllFields,
+    moveField,
 } = useFieldPreferences(
     'detail',
     categoryPath.value,
     props.smartDefaults || [],
+    { preferenceName: 'submission-visible-fields' },
 );
 
 // Available fields from backend - PRIMARY: Form-specific fields only
@@ -283,8 +354,8 @@ const allAvailableFields = computed(() => {
         fields = props.stationFields || [];
     }
 
-    // Filter out internal fields from user UI
-    return filterOutTechnicalFields(fields);
+    // Filter out internal fields from user UI + collapse aliases to canonical keys
+    return dedupeFieldsByCanonicalKey(filterOutTechnicalFields(fields));
 });
 
 // Check if a field is new
@@ -317,18 +388,14 @@ const groupedFields = computed(() =>
 
 // Get visible data fields based on preferences
 const visibleDataFields = computed(() => {
-    if (visibleFields.value.size === 0) {
-        // Default: show essential fields
-        return Object.entries(props.submission.data).filter(
-            ([key]) =>
-                ['fname', 'lname', 'email', 'message_long'].includes(key) &&
-                !isTechnicalFieldKey(key),
-        );
+    if (visibleFieldOrder.value.length === 0) {
+        return [];
     }
 
-    return Object.entries(props.submission.data).filter(
-        ([key]) => visibleFields.value.has(key) && !isTechnicalFieldKey(key),
-    );
+    return visibleFieldOrder.value
+        .filter((key) => !isTechnicalFieldKey(key))
+        .map((key) => [key, resolveAliasedValue(props.submission.data, key)] as const)
+        .filter(([, value]) => value !== null && value !== undefined && value !== '');
 });
 
 // Get all data fields
@@ -347,7 +414,7 @@ const savingLayout = ref(false);
 const saveLayoutPreferences = async (): Promise<boolean> => {
     savingLayout.value = true;
     try {
-        const currentFields = Array.from(visibleFields.value);
+        const currentFields = visibleFieldOrder.value.slice();
 
         // Only save fields that exist in availableFields (prevent saving non-existent fields)
         const validFields = currentFields.filter((fieldKey) =>
@@ -360,7 +427,7 @@ const saveLayoutPreferences = async (): Promise<boolean> => {
         }
 
         const result = await savePreferences(validFields, {
-            preferenceName: 'detail-view-layout',
+            preferenceName: 'submission-visible-fields',
             asDefault: true, // Save as default preference
         });
 
@@ -502,15 +569,12 @@ onMounted(() => {
                                     size="sm"
                                     @click="
                                         async () => {
-                                            const newSet = new Set(
-                                                visibleFields,
+                                            setAllFields(
+                                                allAvailableFields.map(
+                                                    (f: FieldInfo) => f.key,
+                                                ),
+                                                true,
                                             );
-                                            allAvailableFields.forEach(
-                                                (f: FieldInfo) => {
-                                                    newSet.add(f.key);
-                                                },
-                                            );
-                                            visibleFields = newSet;
                                             await saveLayoutPreferences();
                                         }
                                     "
@@ -523,7 +587,7 @@ onMounted(() => {
                                     size="sm"
                                     @click="
                                         async () => {
-                                            visibleFields = new Set();
+                                            setAllFields([], false);
                                             await saveLayoutPreferences();
                                         }
                                     "
@@ -569,18 +633,10 @@ onMounted(() => {
                             >
                                 <input
                                     type="checkbox"
-                                    :checked="visibleFields.has(field.key)"
+                                    :checked="visibleFieldSet.has(field.key)"
                                     @change="
                                         async () => {
-                                            const newSet = new Set(
-                                                visibleFields,
-                                            );
-                                            if (newSet.has(field.key)) {
-                                                newSet.delete(field.key);
-                                            } else {
-                                                newSet.add(field.key);
-                                            }
-                                            visibleFields = newSet;
+                                            toggleField(field.key);
                                             await saveLayoutPreferences();
                                         }
                                     "
@@ -608,7 +664,7 @@ onMounted(() => {
                                     >Saving...</span
                                 >
                                 <span
-                                    v-else-if="visibleFields.size > 0"
+                                    v-else-if="visibleFieldOrder.length > 0"
                                     class="text-green-600"
                                     >✓ Saved</span
                                 >
@@ -657,7 +713,7 @@ onMounted(() => {
                                         <CardTitle>Form Data</CardTitle>
                                         <CardDescription>
                                             {{
-                                                visibleFields.size > 0
+                                                visibleFieldOrder.length > 0
                                                     ? 'Selected fields'
                                                     : 'Essential fields'
                                             }}
@@ -810,21 +866,6 @@ onMounted(() => {
                                     </div>
                                 </div>
 
-                                <!-- IP Address -->
-                                <div class="flex items-center gap-3">
-                                    <Globe class="h-4 w-4 text-gray-400" />
-                                    <div class="flex-1">
-                                        <div class="text-sm text-gray-500">
-                                            IP Address
-                                        </div>
-                                        <div
-                                            class="font-mono text-sm text-gray-900"
-                                        >
-                                            {{ submission.ip_address }}
-                                        </div>
-                                    </div>
-                                </div>
-
                                 <!-- Submission Time -->
                                 <div class="flex items-center gap-3">
                                     <Calendar class="h-4 w-4 text-gray-400" />
@@ -963,6 +1004,50 @@ onMounted(() => {
                                             ? 'Mark Unread'
                                             : 'Mark Read'
                                     }}
+                                </Button>
+
+                                <!-- Mark / Unmark -->
+                                <Button
+                                    @click="toggleMark"
+                                    variant="outline"
+                                    size="sm"
+                                    class="w-full justify-start"
+                                >
+                                    <Star
+                                        class="mr-2 h-4 w-4"
+                                        :class="
+                                            isMarkedByCurrentUser
+                                                ? 'text-yellow-500 fill-yellow-500'
+                                                : 'text-gray-400'
+                                        "
+                                    />
+                                    {{
+                                        isMarkedByCurrentUser
+                                            ? 'Unmark'
+                                            : 'Mark'
+                                    }}
+                                </Button>
+
+                                <!-- Forward via Email -->
+                                <a :href="forwardEmailHref" class="w-full">
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        class="w-full justify-start"
+                                    >
+                                        <Mail class="mr-2 h-4 w-4" />
+                                        Forward via Email
+                                    </Button>
+                                </a>
+
+                                <!-- Print -->
+                                <Button
+                                    @click="printSubmission"
+                                    variant="outline"
+                                    size="sm"
+                                    class="w-full justify-start"
+                                >
+                                    Print
                                 </Button>
 
                                 <!-- Delete -->

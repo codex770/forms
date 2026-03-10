@@ -20,6 +20,13 @@ const TECHNICAL_FIELDS = new Set<string>([
     'uri',
     'userid',
     'uuid',
+    // Coordinates / internal tracking
+    'latitude',
+    'longitude',
+    // Common internal flags/fields mentioned by client
+    'profile',
+    'changed',
+    'completed',
 ]);
 
 function normalizeKey(key: string): string {

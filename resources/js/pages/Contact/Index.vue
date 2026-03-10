@@ -48,7 +48,6 @@ interface ContactSubmission {
         description?: string;
         [key: string]: any;
     };
-    ip_address: string;
     created_at: string;
     updated_at: string;
     reads_with_users: Array<{
