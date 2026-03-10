@@ -3,30 +3,58 @@
  */
 
 const TECHNICAL_FIELDS = new Set<string>([
+    // System / Database IDs
+    'sid',
+    'submissionid',
+    'serial',
     'entityid',
     'entitytype',
-    'indraft',
-    'langcode',
-    'lockes',
-    'notes',
-    'randhashid',
-    'remoteaddr',
-    'segments',
-    'serial',
-    'sid',
-    'sticky',
-    'token',
     'uid',
-    'uri',
     'userid',
     'uuid',
+
+    // System metadata / state fields (Drupal)
+    'created',
+    'changed',
+    'completed',
+    'indraft',
+    'locked',
+    'lockes',
+    'sticky',
+    'langcode',
+    'currentpage',
+
+    // Tracking / security fields
+    'randhashid',
+    'token',
+    'remoteaddr',
+
+    // Form infrastructure fields
+    'webformid',
+    'station',
+    'uri',
+    'segments',
+
+    // File system metadata
+    'file',
+    'fileid',
+    'fileuri',
+    'fileuuid',
+    'filename',
+    'filemime',
+    'filedata',
+
+    // Other internal fields
+    'notes',
+    'datei',
+    'dataprivacyselect',
+
     // Coordinates / internal tracking
     'latitude',
     'longitude',
+
     // Common internal flags/fields mentioned by client
     'profile',
-    'changed',
-    'completed',
 ]);
 
 function normalizeKey(key: string): string {

@@ -1,3 +1,5 @@
+import { isTechnicalFieldKey } from './technicalFields';
+
 /**
  * Utility functions for field detection and formatting
  */
@@ -90,6 +92,10 @@ export function groupFieldsByCategory(fields: FieldInfo[]): Record<string, Field
     const categorized = new Set<string>();
     
     fields.forEach(field => {
+        if (isTechnicalFieldKey(field.key) || isTechnicalFieldKey(field.label)) {
+            return;
+        }
+
         // Skip if already categorized
         if (categorized.has(field.key)) {
             return;
@@ -188,4 +194,3 @@ export function getFieldLabel(key: string): string {
         .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
         .join(' ');
 }
-
