@@ -3,6 +3,15 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
+import {
+    Dialog,
+    DialogClose,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+} from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import {
     Table,
@@ -23,12 +32,15 @@ import {
 import { dashboard as userDashboard } from '@/routes/user';
 import { type BreadcrumbItem } from '@/types';
 import {
+    dedupeFieldsByCanonicalKey,
+    toCanonicalFieldKey,
+} from '@/utils/fieldAliases';
+import {
     formatFieldValue,
     groupFieldsByCategory,
 } from '@/utils/fieldDetection';
-import { filterOutTechnicalFields } from '@/utils/technicalFields';
-import { dedupeFieldsByCanonicalKey, toCanonicalFieldKey } from '@/utils/fieldAliases';
 import { useI18n } from '@/utils/i18n';
+import { filterOutTechnicalFields } from '@/utils/technicalFields';
 import { Head, Link, router, usePage } from '@inertiajs/vue3';
 import {
     AlertCircle,
@@ -40,11 +52,12 @@ import {
     Download,
     Edit,
     Eye,
+    FileSpreadsheet,
     FileText,
     Filter,
-    Star,
     Save,
     Search,
+    Star,
     Trash2,
     X,
     XCircle,
@@ -164,6 +177,8 @@ const showAdvancedFilters = ref(false);
 const selectedRows = ref<Set<number>>(new Set());
 const editingRow = ref<number | null>(null);
 const editingData = ref<any>({});
+const exportDialogOpen = ref(false);
+const exportScope = ref<'current' | 'selected'>('current');
 
 // Build category path for preferences
 // DEFAULT: Type level (station:type) - most efficient, applies to all forms of that type
@@ -272,7 +287,9 @@ const groupedFields = computed(() =>
 // Computed property for visible fields (ensures reactivity)
 const visibleFieldList = computed(() => {
     const map = new Map<string, FieldInfo>();
-    allAvailableFields.value.forEach((f) => map.set(toCanonicalFieldKey(f.key), f));
+    allAvailableFields.value.forEach((f) =>
+        map.set(toCanonicalFieldKey(f.key), f),
+    );
 
     return visibleFieldOrder.value
         .map((k) => map.get(toCanonicalFieldKey(k)))
@@ -341,7 +358,9 @@ const isReadByCurrentUser = (submission: ContactSubmission): boolean => {
 };
 
 const isMarkedByCurrentUser = (submission: ContactSubmission): boolean => {
-    return (submission.marks || []).some((m) => m.user_id === authUser.value?.id);
+    return (submission.marks || []).some(
+        (m) => m.user_id === authUser.value?.id,
+    );
 };
 
 // Get initials for avatar - handles full name or separate first/last names
@@ -486,8 +505,13 @@ const applyFilters = () => {
         replace: true,
         onFinish: () => {
             nextTick(() => {
-                const firstRow = document.querySelector('tbody tr') as HTMLElement | null;
-                firstRow?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                const firstRow = document.querySelector(
+                    'tbody tr',
+                ) as HTMLElement | null;
+                firstRow?.scrollIntoView({
+                    behavior: 'smooth',
+                    block: 'start',
+                });
             });
         },
     });
@@ -540,33 +564,40 @@ const bulkMarkAsRead = () => {
 const exportSelected = () => {
     if (selectedRows.value.size === 0) return;
 
-    const ids = Array.from(selectedRows.value);
-    const fields = visibleFieldOrder.value;
-    const baseParams = new URLSearchParams();
-    ids.forEach((id) => baseParams.append('ids[]', String(id)));
-    fields.forEach((f) => baseParams.append('fields[]', String(f)));
-
-    // Reuse current filter/sort params from URL
-    const current = new URLSearchParams(window.location.search);
-    current.forEach((v, k) => baseParams.append(k, v));
-
-    const csvUrl = `/forms/${props.webformId}/export?format=csv&${baseParams.toString()}`;
-    const xlsxUrl = `/forms/${props.webformId}/export?format=xlsx&${baseParams.toString()}`;
-
-    const choice = prompt('Export format: csv or xlsx', 'csv');
-    const url = (choice || '').toLowerCase() === 'xlsx' ? xlsxUrl : csvUrl;
-    window.open(url, '_blank');
+    exportScope.value = 'selected';
+    exportDialogOpen.value = true;
 };
 
 const exportCurrentView = () => {
-    const fields = visibleFieldOrder.value;
-    const params = new URLSearchParams(window.location.search);
-    fields.forEach((f) => params.append('fields[]', String(f)));
+    exportScope.value = 'current';
+    exportDialogOpen.value = true;
+};
 
-    const csvUrl = `/forms/${props.webformId}/export?format=csv&${params.toString()}`;
-    const xlsxUrl = `/forms/${props.webformId}/export?format=xlsx&${params.toString()}`;
-    const choice = prompt('Export format: csv or xlsx', 'csv');
-    const url = (choice || '').toLowerCase() === 'xlsx' ? xlsxUrl : csvUrl;
+const buildExportUrl = (format: 'csv' | 'xlsx', ids?: number[]) => {
+    const params = new URLSearchParams(window.location.search);
+    visibleFieldOrder.value.forEach((f) =>
+        params.append('fields[]', String(f)),
+    );
+
+    if (ids && ids.length > 0) {
+        ids.forEach((id) => params.append('ids[]', String(id)));
+    }
+
+    return `/forms/${props.webformId}/export?format=${format}&${params.toString()}`;
+};
+
+const runExport = (format: 'csv' | 'xlsx') => {
+    const ids =
+        exportScope.value === 'selected'
+            ? Array.from(selectedRows.value)
+            : undefined;
+
+    if (exportScope.value === 'selected' && (!ids || ids.length === 0)) {
+        return;
+    }
+
+    const url = buildExportUrl(format, ids);
+    exportDialogOpen.value = false;
     window.open(url, '_blank');
 };
 
@@ -574,12 +605,17 @@ const printTable = () => {
     const cols = visibleFieldList.value;
     const rows = props.submissions.data || [];
 
-    const ths = ['ID', ...cols.map((c) => c.label), 'Date'].map((h) => `<th>${h}</th>`).join('');
+    const ths = ['ID', ...cols.map((c) => c.label), 'Date']
+        .map((h) => `<th>${h}</th>`)
+        .join('');
     const trs = rows
         .map((s) => {
             const tds = [
                 `<td>#${s.id}</td>`,
-                ...cols.map((c) => `<td>${String(getFieldValue(s.data, c.key) ?? '')}</td>`),
+                ...cols.map(
+                    (c) =>
+                        `<td>${String(getFieldValue(s.data, c.key) ?? '')}</td>`,
+                ),
                 `<td>${new Date(s.created_at).toLocaleString()}</td>`,
             ].join('');
             return `<tr>${tds}</tr>`;
@@ -692,7 +728,9 @@ const onFieldCheckboxClick = (fieldKey: string, e?: MouseEvent) => {
 };
 
 // Retention settings
-const retentionDaysInput = ref<string>(props.retentionDays != null ? String(props.retentionDays) : '');
+const retentionDaysInput = ref<string>(
+    props.retentionDays != null ? String(props.retentionDays) : '',
+);
 const retentionNotes = ref('');
 const savingRetention = ref(false);
 const retentionSaved = ref(false);
@@ -701,13 +739,22 @@ const saveRetentionRule = async () => {
     savingRetention.value = true;
     retentionSaved.value = false;
     try {
-        const days = retentionDaysInput.value.trim() !== '' ? parseInt(retentionDaysInput.value, 10) : null;
-        await postJson(`/forms/${props.webformId}/retention-rule`, {
-            retention_days: days,
-            notes: retentionNotes.value || null,
-        }, { method: 'PUT' });
+        const days =
+            retentionDaysInput.value.trim() !== ''
+                ? parseInt(retentionDaysInput.value, 10)
+                : null;
+        await postJson(
+            `/forms/${props.webformId}/retention-rule`,
+            {
+                retention_days: days,
+                notes: retentionNotes.value || null,
+            },
+            { method: 'PUT' },
+        );
         retentionSaved.value = true;
-        setTimeout(() => { retentionSaved.value = false; }, 3000);
+        setTimeout(() => {
+            retentionSaved.value = false;
+        }, 3000);
     } catch (e) {
         console.error('Failed to save retention rule', e);
     } finally {
@@ -725,7 +772,10 @@ onMounted(async () => {
     await loadPreferencesWrapper();
 
     // If no preference found, apply smart defaults (canonical + ordered)
-    if (visibleFieldOrder.value.length === 0 && allAvailableFields.value.length > 0) {
+    if (
+        visibleFieldOrder.value.length === 0 &&
+        allAvailableFields.value.length > 0
+    ) {
         const defaults =
             props.smartDefaults ||
             allAvailableFields.value.slice(0, 4).map((f: FieldInfo) => f.key);
@@ -759,8 +809,9 @@ onMounted(async () => {
                             {{ formName }}
                         </h1>
                         <p class="mt-1 text-muted-foreground">
-                            {{ totalCount }} {{ t('forms.total_submissions') }}
-                            • {{ t('forms.station') }}: {{ station }}
+                            {{ totalCount }}
+                            {{ t('forms.total_submissions') }} •
+                            {{ t('forms.station') }}: {{ station }}
                         </p>
                         <p class="text-xs text-muted-foreground">
                             Form ID: {{ webformId }}
@@ -774,14 +825,29 @@ onMounted(async () => {
                     <Button
                         variant="outline"
                         size="sm"
-                        @click="hideDuplicates = !hideDuplicates; applyFilters()"
-                        :class="hideDuplicates ? 'border-orange-400 text-orange-600' : ''"
+                        @click="
+                            hideDuplicates = !hideDuplicates;
+                            applyFilters();
+                        "
+                        :class="
+                            hideDuplicates
+                                ? 'border-orange-400 text-orange-600'
+                                : ''
+                        "
                         title="When enabled, duplicate submissions (same email/phone/name/PLZ/birthyear) are collapsed into a single row with a count badge."
                     >
                         <Eye class="mr-2 h-4 w-4" />
-                        {{ hideDuplicates ? t('forms.duplicates_hidden') : t('forms.duplicates_shown') }}
+                        {{
+                            hideDuplicates
+                                ? t('forms.duplicates_hidden')
+                                : t('forms.duplicates_shown')
+                        }}
                     </Button>
-                    <Button variant="outline" size="sm" @click="exportCurrentView">
+                    <Button
+                        variant="outline"
+                        size="sm"
+                        @click="exportCurrentView"
+                    >
                         <Download class="mr-2 h-4 w-4" />
                         {{ t('forms.export') }}
                     </Button>
@@ -803,7 +869,17 @@ onMounted(async () => {
                             <Button
                                 variant="ghost"
                                 size="sm"
-                                @click="async () => { setAllFields(allAvailableFields.map((f) => f.key), true); await saveColumnPreferences(); }"
+                                @click="
+                                    async () => {
+                                        setAllFields(
+                                            allAvailableFields.map(
+                                                (f) => f.key,
+                                            ),
+                                            true,
+                                        );
+                                        await saveColumnPreferences();
+                                    }
+                                "
                                 class="h-8 text-xs"
                             >
                                 {{ t('columns.select_all') }}
@@ -811,7 +887,12 @@ onMounted(async () => {
                             <Button
                                 variant="ghost"
                                 size="sm"
-                                @click="async () => { setAllFields([], false); await saveColumnPreferences(); }"
+                                @click="
+                                    async () => {
+                                        setAllFields([], false);
+                                        await saveColumnPreferences();
+                                    }
+                                "
                                 class="h-8 text-xs"
                             >
                                 {{ t('columns.clear_all') }}
@@ -822,14 +903,16 @@ onMounted(async () => {
                 <CardContent>
                     <!-- Reorder selected columns -->
                     <div v-if="visibleFieldList.length > 1" class="mb-4">
-                        <div class="text-xs font-semibold text-muted-foreground mb-2">
+                        <div
+                            class="mb-2 text-xs font-semibold text-muted-foreground"
+                        >
                             Reorder selected columns (drag & drop)
                         </div>
                         <div class="flex flex-wrap gap-2">
                             <div
                                 v-for="field in visibleFieldList"
                                 :key="`reorder-${field.key}`"
-                                class="cursor-move select-none rounded border bg-background px-2 py-1 text-xs hover:bg-muted"
+                                class="cursor-move rounded border bg-background px-2 py-1 text-xs select-none hover:bg-muted"
                                 draggable="true"
                                 @dragstart="onDragStart(field.key)"
                                 @dragover.prevent
@@ -850,7 +933,13 @@ onMounted(async () => {
                             <input
                                 type="checkbox"
                                 :checked="visibleFieldSet.has(field.key)"
-                                @change="async () => { await handleFieldCheckboxChange(field.key); }"
+                                @change="
+                                    async () => {
+                                        await handleFieldCheckboxChange(
+                                            field.key,
+                                        );
+                                    }
+                                "
                                 class="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
                             />
                             <span class="text-sm font-medium select-none">{{
@@ -904,7 +993,11 @@ onMounted(async () => {
                                     showAdvancedFilters = !showAdvancedFilters
                                 "
                             >
-                                {{ showAdvancedFilters ? t('filter.hide_advanced') : t('filter.advanced') }}
+                                {{
+                                    showAdvancedFilters
+                                        ? t('filter.hide_advanced')
+                                        : t('filter.advanced')
+                                }}
                                 <ChevronDown
                                     v-if="!showAdvancedFilters"
                                     class="ml-2 h-4 w-4"
@@ -926,7 +1019,9 @@ onMounted(async () => {
                     <!-- Basic Filters -->
                     <div class="mb-4 grid grid-cols-1 gap-4 md:grid-cols-3">
                         <div class="space-y-2">
-                            <label class="text-sm font-medium">{{ t('filter.search') }}</label>
+                            <label class="text-sm font-medium">{{
+                                t('filter.search')
+                            }}</label>
                             <Input
                                 v-model="searchQuery"
                                 :placeholder="t('filter.search_placeholder')"
@@ -934,19 +1029,31 @@ onMounted(async () => {
                             />
                         </div>
                         <div class="space-y-2">
-                            <label class="text-sm font-medium">{{ t('filter.status') }}</label>
+                            <label class="text-sm font-medium">{{
+                                t('filter.status')
+                            }}</label>
                             <select
                                 v-model="selectedStatus"
                                 class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
                             >
-                                <option value="all">{{ t('filter.status_all') }}</option>
-                                <option value="unread">{{ t('filter.status_unread') }}</option>
-                                <option value="read">{{ t('filter.status_read') }}</option>
-                                <option value="starred">{{ t('filter.status_starred') }}</option>
+                                <option value="all">
+                                    {{ t('filter.status_all') }}
+                                </option>
+                                <option value="unread">
+                                    {{ t('filter.status_unread') }}
+                                </option>
+                                <option value="read">
+                                    {{ t('filter.status_read') }}
+                                </option>
+                                <option value="starred">
+                                    {{ t('filter.status_starred') }}
+                                </option>
                             </select>
                         </div>
                         <div class="space-y-2">
-                            <label class="text-sm font-medium">{{ t('filter.date_range') }}</label>
+                            <label class="text-sm font-medium">{{
+                                t('filter.date_range')
+                            }}</label>
                             <div class="flex gap-2">
                                 <Input
                                     v-model="dateFrom"
@@ -1260,7 +1367,9 @@ onMounted(async () => {
                                             class="inline-flex items-center"
                                             @click="toggleMark(submission)"
                                             :title="
-                                                isMarkedByCurrentUser(submission)
+                                                isMarkedByCurrentUser(
+                                                    submission,
+                                                )
                                                     ? 'Unmark'
                                                     : 'Mark'
                                             "
@@ -1271,7 +1380,7 @@ onMounted(async () => {
                                                     isMarkedByCurrentUser(
                                                         submission,
                                                     )
-                                                        ? 'text-yellow-500 fill-yellow-500'
+                                                        ? 'fill-yellow-500 text-yellow-500'
                                                         : 'text-gray-300 hover:text-yellow-400'
                                                 "
                                             />
@@ -1287,10 +1396,16 @@ onMounted(async () => {
                                     <div class="flex items-center gap-1">
                                         #{{ submission.id }}
                                         <span
-                                            v-if="(submission.duplicate_count ?? 1) > 1"
-                                            class="inline-flex items-center justify-center rounded-full bg-orange-100 px-1.5 py-0.5 text-xs font-semibold text-orange-700 leading-none"
+                                            v-if="
+                                                (submission.duplicate_count ??
+                                                    1) > 1
+                                            "
+                                            class="inline-flex items-center justify-center rounded-full bg-orange-100 px-1.5 py-0.5 text-xs leading-none font-semibold text-orange-700"
                                             :title="`${submission.duplicate_count} duplicate submissions with the same email/phone/name/PLZ/birthyear`"
-                                        >×{{ submission.duplicate_count }}</span>
+                                            >×{{
+                                                submission.duplicate_count
+                                            }}</span
+                                        >
                                     </div>
                                 </TableCell>
 
@@ -1524,7 +1639,9 @@ onMounted(async () => {
                     </p>
                     <div class="flex items-end gap-4">
                         <div class="space-y-1">
-                            <label class="text-sm font-medium">{{ t('retention.days_label') }}</label>
+                            <label class="text-sm font-medium">{{
+                                t('retention.days_label')
+                            }}</label>
                             <Input
                                 v-model="retentionDaysInput"
                                 type="number"
@@ -1541,18 +1658,69 @@ onMounted(async () => {
                             size="sm"
                         >
                             <Save class="mr-2 h-4 w-4" />
-                            {{ savingRetention ? t('retention.saving') : t('retention.save') }}
+                            {{
+                                savingRetention
+                                    ? t('retention.saving')
+                                    : t('retention.save')
+                            }}
                         </Button>
-                        <span v-if="retentionSaved" class="text-sm text-green-600">{{ t('retention.saved') }}</span>
-                        <span v-if="retentionDaysInput === ''" class="text-xs text-muted-foreground">
+                        <span
+                            v-if="retentionSaved"
+                            class="text-sm text-green-600"
+                            >{{ t('retention.saved') }}</span
+                        >
+                        <span
+                            v-if="retentionDaysInput === ''"
+                            class="text-xs text-muted-foreground"
+                        >
                             {{ t('retention.forever') }}
                         </span>
                         <span v-else class="text-xs text-muted-foreground">
-                            {{ t('retention.will_delete', { days: retentionDaysInput }) }}
+                            {{
+                                t('retention.will_delete', {
+                                    days: retentionDaysInput,
+                                })
+                            }}
                         </span>
                     </div>
                 </CardContent>
             </Card>
         </div>
+
+        <Dialog
+            :open="exportDialogOpen"
+            @update:open="exportDialogOpen = $event"
+        >
+            <DialogContent class="sm:max-w-md">
+                <DialogHeader class="space-y-2">
+                    <DialogTitle>Export submissions</DialogTitle>
+                    <DialogDescription>
+                        <span v-if="exportScope === 'selected'">
+                            Export {{ selectedRows.size }} selected
+                            submission(s).
+                        </span>
+                        <span v-else>
+                            Export the current view with applied filters and
+                            columns.
+                        </span>
+                    </DialogDescription>
+                </DialogHeader>
+                <div class="mt-4 grid gap-2">
+                    <Button variant="outline" @click="runExport('csv')">
+                        <FileText class="mr-2 h-4 w-4" />
+                        Export CSV
+                    </Button>
+                    <Button variant="outline" @click="runExport('xlsx')">
+                        <FileSpreadsheet class="mr-2 h-4 w-4" />
+                        Export Excel
+                    </Button>
+                </div>
+                <DialogFooter class="mt-4">
+                    <DialogClose as-child>
+                        <Button variant="ghost">Cancel</Button>
+                    </DialogClose>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
     </AppLayout>
 </template>
