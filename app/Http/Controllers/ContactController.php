@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\ContactMark;
 use App\Models\ContactRetentionRule;
 use App\Models\ContactSubmission;
+use App\Models\FormColumnConfig;
 use App\Helpers\FormDefaultsHelper;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -687,40 +688,67 @@ class ContactController extends Controller
     }
 
     /**
-     * Get human-readable label for a field key.
+     * Get human-readable label for a field key (German).
      */
     private function getFieldLabel(string $key): string
     {
+        // Labels from client form field reference (TITLE column)
         $labels = [
-            'fname' => 'First Name',
-            'lname' => 'Last Name',
-            'first_name' => 'First Name',
-            'last_name' => 'Last Name',
+            'station' => 'Station',
+            'userid' => 'User ID',
+            'gender' => 'Anrede',
+            'sex' => 'Anrede',
+            'fname' => 'Vorname',
+            'first_name' => 'Vorname',
+            'vorname' => 'Vorname',
+            'lname' => 'Nachname',
+            'last_name' => 'Nachname',
+            'nachname' => 'Nachname',
             'name' => 'Name',
-            'email' => 'Email',
-            'email_address' => 'Email Address',
-            'phone' => 'Phone',
-            'message_long' => 'Message (Long)',
-            'message_short' => 'Message (Short)',
-            'message' => 'Message',
-            'description' => 'Description',
-            'city' => 'City',
-            'zip' => 'ZIP Code',
-            'zip_code' => 'ZIP Code',
-            'postal_code' => 'Postal Code',
-            'plz' => 'PLZ',
-            'gender' => 'Gender',
-            'age' => 'Age',
-            'birth_year' => 'Birth Year',
-            'birthday' => 'Birthday',
-            'bday' => 'Birthday',
+            'full_name' => 'Name',
+            'contact_name' => 'Name',
+            'address' => 'Straße & Hausnummer',
+            'street' => 'Straße & Hausnummer',
+            'zip' => 'Postleitzahl',
+            'zip_code' => 'Postleitzahl',
+            'postal_code' => 'Postleitzahl',
+            'postcode' => 'Postleitzahl',
+            'plz' => 'Postleitzahl',
+            'city' => 'Stadt',
+            'ort' => 'Stadt',
+            'place' => 'Ort',
+            'location' => 'Ort',
+            'phone' => 'Telefon',
+            'phone_number' => 'Telefon',
+            'tel' => 'Telefon',
+            'telephone' => 'Telefon',
+            'mobile' => 'Mobil',
+            'telefon' => 'Telefon',
+            'email' => 'E-Mail',
+            'email_address' => 'E-Mail',
+            'e_mail' => 'E-Mail',
+            'birthday' => 'Geburtsdatum',
+            'bday' => 'Geburtsdatum',
+            'geburtstag' => 'Geburtsdatum',
+            'date_of_birth' => 'Geburtsdatum',
+            'dob' => 'Geburtsdatum',
+            'birth_year' => 'Geburtsjahr',
+            'birthYear' => 'Geburtsjahr',
+            'year_of_birth' => 'Geburtsjahr',
+            'message_long' => 'Nachricht (lang)',
+            'message_short' => 'Nachricht (kurz)',
+            'message' => 'Nachricht',
+            'description' => 'Beschreibung',
+            'content' => 'Inhalt',
+            'text' => 'Text',
+            'age' => 'Alter',
         ];
 
+        $key = strtolower(trim($key));
         if (isset($labels[$key])) {
             return $labels[$key];
         }
 
-        // Convert snake_case or camelCase to Title Case
         return ucwords(str_replace(['_', '-'], ' ', $key));
     }
 
@@ -889,6 +917,42 @@ class ContactController extends Controller
             'success' => true,
             'retention_days' => $rule->retention_days,
             'notes' => $rule->notes,
+        ]);
+    }
+
+    public function getColumnConfig(string $webformId): JsonResponse
+    {
+        $formInfo = ContactSubmission::where('webform_id', $webformId)
+            ->select('submission_form', 'station')
+            ->first();
+
+        $config = FormColumnConfig::forWebform(
+            $webformId,
+            $formInfo?->submission_form,
+            $formInfo?->station
+        );
+
+        return response()->json([
+            'success' => true,
+            'visible_columns' => $config?->visible_columns ?? [],
+        ]);
+    }
+
+    public function saveColumnConfig(Request $request, string $webformId): JsonResponse
+    {
+        $validated = $request->validate([
+            'visible_columns' => 'required|array',
+            'visible_columns.*' => 'string|max:255',
+        ]);
+
+        $config = FormColumnConfig::saveForWebform(
+            $webformId,
+            array_values($validated['visible_columns'])
+        );
+
+        return response()->json([
+            'success' => true,
+            'visible_columns' => $config->visible_columns,
         ]);
     }
 
@@ -1065,8 +1129,9 @@ class ContactController extends Controller
 
     /**
      * Mark/unmark (star) a submission for the current user.
+     * Always returns JSON for XHR/fetch requests.
      */
-    public function toggleMark(Request $request, ContactSubmission $submission)
+    public function toggleMark(Request $request, ContactSubmission $submission): \Illuminate\Http\JsonResponse
     {
         $userId = auth()->id();
         $existing = $submission->marks()->where('user_id', $userId)->first();
@@ -1085,15 +1150,11 @@ class ContactController extends Controller
             },
         ]);
 
-        if ($request->expectsJson() || $request->ajax()) {
-            return response()->json([
-                'success' => true,
-                'message' => $message,
-                'marked' => $submission->marks->isNotEmpty(),
-            ]);
-        }
-
-        return back()->with('success', $message);
+        return response()->json([
+            'success' => true,
+            'message' => $message,
+            'marked' => $submission->marks->isNotEmpty(),
+        ]);
     }
 
     /**

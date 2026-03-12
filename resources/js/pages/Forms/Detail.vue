@@ -180,27 +180,7 @@ const editingData = ref<any>({});
 const exportDialogOpen = ref(false);
 const exportScope = ref<'current' | 'selected'>('current');
 
-// Build category path for preferences
-// DEFAULT: Type level (station:type) - most efficient, applies to all forms of that type
-// OVERRIDE: Form level (station:type:webform_id) - for special cases
-const categoryPath = computed(() => {
-    // Default to TYPE level for preference storage (efficient)
-    if (props.submissionForm) {
-        return `${props.station}:${props.submissionForm}`; // TYPE level
-    }
-    return props.webformId; // Fallback to form level
-});
-
-// Form-level category (for reference, but preferences default to type level)
-const formCategoryPath = computed(() => {
-    if (props.submissionForm) {
-        return `${props.station}:${props.submissionForm}:${props.webformId}`;
-    }
-    return props.webformId;
-});
-
-// Field preferences composable - uses TYPE level by default
-// Pass smart defaults from backend for optimal first-time experience
+// Field preferences composable - global form-level config (shared overview + detail)
 const {
     visibleFieldOrder,
     visibleFieldSet,
@@ -213,10 +193,9 @@ const {
     moveField,
     loading: loadingPrefs,
     saving: savingPrefs,
-    // Removed preferences (presets) - using single auto-saving preference
-} = useFieldPreferences('list', categoryPath.value, props.smartDefaults || [], {
+} = useFieldPreferences(props.webformId, 'list', props.smartDefaults || [], {
     preferenceName: 'submission-visible-fields',
-}); // Shared fields between overview/detail
+});
 
 // Clear new fields notification
 const clearNewFields = async () => {
@@ -665,13 +644,13 @@ const toggleRead = async (submission: ContactSubmission) => {
 const toggleMark = async (submission: ContactSubmission) => {
     try {
         await postJson(`/contact-messages/${submission.id}/toggle-mark`);
-
         await router.get(window.location.pathname + window.location.search, {
             preserveState: false,
             preserveScroll: true,
         });
     } catch (error) {
         console.error('Error toggling mark:', error);
+        alert(t('common.error') + ': ' + (error instanceof Error ? error.message : String(error)));
     }
 };
 
@@ -970,8 +949,7 @@ onMounted(async () => {
                             >
                         </div>
                         <div class="mt-1">
-                            Preference level: <strong>Type</strong> (applies to
-                            all {{ submissionForm || 'forms' }} forms)
+                            {{ t('columns.form_config') }}
                         </div>
                     </div>
                 </CardContent>

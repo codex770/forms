@@ -218,13 +218,10 @@ const toggleRead = async () => {
 const toggleMark = async () => {
     try {
         const data = await postJson(`/contact-messages/${props.submission.id}/toggle-mark`);
-        if (data && typeof data.marked === 'boolean') {
-            marked.value = data.marked;
-        } else {
-            marked.value = !marked.value;
-        }
+        marked.value = data?.marked === true;
     } catch (error) {
         console.error('Error toggling mark:', error);
+        alert('Fehler: Markierung konnte nicht gespeichert werden.');
     }
 };
 
@@ -307,19 +304,7 @@ const formatAdditionalData = computed(() => {
     );
 });
 
-// Build category path for preferences
-// DEFAULT: Type level (station:type) - most efficient
-const categoryPath = computed(() => {
-    const submission = props.submission;
-    // Default to TYPE level for preference storage (efficient)
-    if (submission.submission_form && submission.station) {
-        return `${submission.station}:${submission.submission_form}`; // TYPE level
-    }
-    return submission.webform_id || null;
-});
-
-// Field preferences composable for detail view
-// Pass smart defaults from backend for optimal first-time experience
+// Field preferences composable - global form-level config (shared with overview)
 const {
     visibleFieldOrder,
     visibleFieldSet,
@@ -331,8 +316,8 @@ const {
     setAllFields,
     moveField,
 } = useFieldPreferences(
+    props.submission.webform_id ?? null,
     'detail',
-    categoryPath.value,
     props.smartDefaults || [],
     { preferenceName: 'submission-visible-fields' },
 );

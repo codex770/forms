@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import LanguageToggle from '@/components/LanguageToggle.vue';
 import NavFooter from '@/components/NavFooter.vue';
 import NavMain from '@/components/NavMain.vue';
 import NavUser from '@/components/NavUser.vue';
@@ -86,9 +85,6 @@ const footerNavItems: NavItem[] = [];
 
         <SidebarFooter>
             <NavFooter :items="footerNavItems" />
-            <div class="px-2 pb-1">
-                <LanguageToggle />
-            </div>
             <NavUser />
         </SidebarFooter>
     </Sidebar>

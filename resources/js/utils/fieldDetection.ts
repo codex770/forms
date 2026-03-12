@@ -154,39 +154,46 @@ export function groupFieldsByCategory(fields: FieldInfo[]): Record<string, Field
 }
 
 /**
- * Get human-readable label for a field key
+ * Get human-readable label for a field key (German).
  */
 export function getFieldLabel(key: string): string {
+    // Labels from client form field reference (TITLE column)
     const labels: Record<string, string> = {
-        'fname': 'First Name',
-        'lname': 'Last Name',
-        'first_name': 'First Name',
-        'last_name': 'Last Name',
+        'station': 'Station',
+        'gender': 'Anrede',
+        'sex': 'Anrede',
+        'fname': 'Vorname',
+        'first_name': 'Vorname',
+        'vorname': 'Vorname',
+        'lname': 'Nachname',
+        'last_name': 'Nachname',
+        'nachname': 'Nachname',
         'name': 'Name',
-        'email': 'Email',
-        'email_address': 'Email Address',
-        'phone': 'Phone',
-        'message_long': 'Message (Long)',
-        'message_short': 'Message (Short)',
-        'message': 'Message',
-        'description': 'Description',
-        'city': 'City',
-        'zip': 'ZIP Code',
-        'zip_code': 'ZIP Code',
-        'postal_code': 'Postal Code',
-        'plz': 'PLZ',
-        'gender': 'Gender',
-        'age': 'Age',
-        'birth_year': 'Birth Year',
-        'birthday': 'Birthday',
-        'bday': 'Birthday',
+        'address': 'Straße & Hausnummer',
+        'street': 'Straße & Hausnummer',
+        'zip': 'Postleitzahl',
+        'zip_code': 'Postleitzahl',
+        'postal_code': 'Postleitzahl',
+        'plz': 'Postleitzahl',
+        'city': 'Stadt',
+        'phone': 'Telefon',
+        'email': 'E-Mail',
+        'email_address': 'E-Mail',
+        'birthday': 'Geburtsdatum',
+        'bday': 'Geburtsdatum',
+        'birth_year': 'Geburtsjahr',
+        'message_long': 'Nachricht (lang)',
+        'message_short': 'Nachricht (kurz)',
+        'message': 'Nachricht',
+        'description': 'Beschreibung',
+        'age': 'Alter',
     };
-    
-    if (labels[key]) {
-        return labels[key];
+
+    const k = key.toLowerCase();
+    if (labels[k]) {
+        return labels[k];
     }
-    
-    // Convert snake_case or camelCase to Title Case
+
     return key
         .replace(/[_-]/g, ' ')
         .replace(/([a-z])([A-Z])/g, '$1 $2')

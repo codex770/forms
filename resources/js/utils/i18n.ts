@@ -1,4 +1,3 @@
-import { usePage } from '@inertiajs/vue3';
 import { computed } from 'vue';
 
 type Locale = 'de' | 'en';
@@ -26,6 +25,7 @@ const translations: Record<Locale, Record<string, string>> = {
         'columns.clear_all': 'Alle abwählen',
         'columns.reorder': 'Spaltenreihenfolge ändern (Drag & Drop)',
         'columns.preference_level': 'Einstellungsebene',
+        'columns.form_config': 'Formular-Konfiguration (für alle Benutzer)',
 
         // Filters
         'filter.title': 'Filter',
@@ -130,6 +130,7 @@ const translations: Record<Locale, Record<string, string>> = {
         'columns.clear_all': 'Clear All',
         'columns.reorder': 'Reorder selected columns (drag & drop)',
         'columns.preference_level': 'Preference level',
+        'columns.form_config': 'Form configuration (for all users)',
 
         // Filters
         'filter.title': 'Filters',
@@ -219,11 +220,7 @@ const translations: Record<Locale, Record<string, string>> = {
  * Usage: const { t, locale } = useI18n();
  */
 export function useI18n() {
-    const page = usePage<{ locale?: string }>();
-    const locale = computed<Locale>(() => {
-        const l = (page.props as any).locale;
-        return l === 'en' ? 'en' : 'de';
-    });
+    const locale = computed<Locale>(() => 'de');
 
     const t = (key: string, vars?: Record<string, string | number>): string => {
         const dict = translations[locale.value] ?? translations['de'];

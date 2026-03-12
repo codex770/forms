@@ -25,10 +25,4 @@ Route::middleware('auth')->group(function () {
 
     Route::get('settings/two-factor', [TwoFactorAuthenticationController::class, 'show'])
         ->name('two-factor.show');
-
-    Route::patch('settings/locale', function (\Illuminate\Http\Request $request) {
-        $request->validate(['locale' => 'required|in:de,en']);
-        $request->user()->update(['locale' => $request->locale]);
-        return back();
-    })->name('settings.locale');
 });

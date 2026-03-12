@@ -28,7 +28,6 @@ import {
     TooltipProvider,
     TooltipTrigger,
 } from '@/components/ui/tooltip';
-import LanguageToggle from '@/components/LanguageToggle.vue';
 import UserMenuContent from '@/components/UserMenuContent.vue';
 import { getInitials } from '@/composables/useInitials';
 import { toUrl, urlIsActive } from '@/lib/utils';
@@ -212,7 +211,6 @@ const rightNavItems: NavItem[] = [];
                 </div>
 
                 <div class="ml-auto flex items-center space-x-2">
-                    <LanguageToggle />
                     <div class="relative flex items-center space-x-1">
                         <Button
                             variant="ghost"

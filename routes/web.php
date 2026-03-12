@@ -62,6 +62,8 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('forms/{webformId}/export', [App\Http\Controllers\ContactController::class, 'exportFormSubmissions'])->name('forms.export');
     Route::get('forms/{webformId}/retention-rule', [App\Http\Controllers\ContactController::class, 'getRetentionRule'])->name('forms.retention.get');
     Route::put('forms/{webformId}/retention-rule', [App\Http\Controllers\ContactController::class, 'saveRetentionRule'])->name('forms.retention.save');
+    Route::get('forms/{webformId}/column-config', [App\Http\Controllers\ContactController::class, 'getColumnConfig'])->name('forms.column-config.get');
+    Route::put('forms/{webformId}/column-config', [App\Http\Controllers\ContactController::class, 'saveColumnConfig'])->name('forms.column-config.save');
 
     // Clear new fields notification
     Route::post('forms/{webformId}/clear-new-fields', function (string $webformId) {
