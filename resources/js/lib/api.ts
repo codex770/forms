@@ -16,6 +16,12 @@ export async function postJson(url: string, body?: any, options?: { method?: str
         body: body ? JSON.stringify(body) : undefined,
     });
 
+    if (res.status === 419) {
+        // CSRF token mismatch; reload to get fresh token
+        window.location.reload();
+        throw new Error('CSRF token expired. Page reloaded.');
+    }
+
     if (!res.ok) {
         const text = await res.text();
         throw new Error(`Request failed: ${res.status} ${text}`);

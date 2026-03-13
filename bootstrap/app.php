@@ -22,6 +22,7 @@ return Application::configure(basePath: dirname(__DIR__))
             AddLinkHeadersForPreloadedAssets::class,
             \App\Http\Middleware\CheckUserActive::class,
             \App\Http\Middleware\SetLocaleFromUser::class,
+            \App\Http\Middleware\PreventPageCache::class,
         ]);
 
         // Replace default CSRF middleware with custom one
