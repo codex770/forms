@@ -57,12 +57,13 @@ import {
     Filter,
     Save,
     Search,
+    GripVertical,
     Star,
     Trash2,
     X,
     XCircle,
 } from 'lucide-vue-next';
-import { computed, nextTick, onMounted, ref } from 'vue';
+import { computed, nextTick, onMounted, ref, watch } from 'vue';
 
 interface ContactSubmission {
     id: number;
@@ -135,6 +136,7 @@ interface Props {
     sortColumn?: string;
     sortDirection?: string;
     retentionDays?: number | null;
+    radiusWarning?: string | null;
 }
 
 const props = defineProps<Props>();
@@ -148,7 +150,7 @@ const authUser = computed(() => usePage().props.auth.user);
 
 const breadcrumbs: BreadcrumbItem[] = [
     {
-        title: 'Form Center',
+        title: t('dashboard.title'),
         href: userDashboard().url,
     },
     {
@@ -179,6 +181,18 @@ const editingRow = ref<number | null>(null);
 const editingData = ref<any>({});
 const exportDialogOpen = ref(false);
 const exportScope = ref<'current' | 'selected'>('current');
+
+// Local copy of submission rows for in-place star/read updates (no page refetch)
+const submissionRows = ref<ContactSubmission[]>([
+    ...(props.submissions.data ?? []),
+]);
+
+watch(
+    () => props.submissions.data,
+    (data) => {
+        submissionRows.value = data ? [...data] : [];
+    },
+);
 
 // Field preferences composable - global form-level config (shared overview + detail)
 const {
@@ -385,12 +399,11 @@ const getDisplayName = (data: any): string => {
 
 // Get display email
 const getDisplayEmail = (data: any): string => {
-    return data?.email || data?.email_address || 'No email provided';
+    return data?.email || data?.email_address || t('common.no_email');
 };
 
 // Get message text - handles multiple message field variations
 const getMessageText = (data: any): string => {
-    // Prefer message_long, then message_short, then other fields
     return (
         data?.message_long ||
         data?.message_short ||
@@ -398,7 +411,7 @@ const getMessageText = (data: any): string => {
         data?.message ||
         data?.content ||
         data?.text ||
-        'No message content'
+        t('common.no_message')
     );
 };
 
@@ -413,10 +426,10 @@ const toggleRowSelection = (id: number) => {
 
 // Toggle all rows
 const toggleAllRows = () => {
-    if (selectedRows.value.size === props.submissions.data?.length) {
+    if (selectedRows.value.size === submissionRows.value.length) {
         selectedRows.value.clear();
     } else {
-        props.submissions.data?.forEach((submission) => {
+        submissionRows.value.forEach((submission) => {
             selectedRows.value.add(submission.id);
         });
     }
@@ -424,7 +437,7 @@ const toggleAllRows = () => {
 
 // Check if all rows are selected
 const allRowsSelected = computed(() => {
-    const total = props.submissions.data?.length ?? 0;
+    const total = submissionRows.value.length;
     return total > 0 && selectedRows.value.size === total;
 });
 
@@ -523,7 +536,9 @@ const bulkDelete = () => {
 
     if (
         confirm(
-            `Are you sure you want to delete ${selectedRows.value.size} submission(s)?`,
+            t('common.confirm_bulk_delete', {
+                count: selectedRows.value.size,
+            }),
         )
     ) {
         // TODO: Implement bulk delete API call
@@ -582,7 +597,7 @@ const runExport = (format: 'csv' | 'xlsx') => {
 
 const printTable = () => {
     const cols = visibleFieldList.value;
-    const rows = props.submissions.data || [];
+    const rows = submissionRows.value;
 
     const ths = ['ID', ...cols.map((c) => c.label), 'Date']
         .map((h) => `<th>${h}</th>`)
@@ -629,25 +644,51 @@ const printTable = () => {
 
 const toggleRead = async (submission: ContactSubmission) => {
     try {
-        await postJson(contactToggleRead(submission.id).url);
+        const data = await postJson(contactToggleRead(submission.id).url);
 
-        // Refresh the current page so the list reflects DB changes
-        await router.get(window.location.pathname + window.location.search, {
-            preserveState: false,
-            preserveScroll: true,
-        });
+        if (data?.reads) {
+            const idx = submissionRows.value.findIndex(
+                (s) => s.id === submission.id,
+            );
+            if (idx >= 0) {
+                submissionRows.value[idx] = {
+                    ...submissionRows.value[idx],
+                    reads_with_users: data.reads,
+                };
+            }
+        }
     } catch (error) {
         console.error('Error toggling read status:', error);
+        alert(t('common.error') + ': ' + (error instanceof Error ? error.message : String(error)));
     }
 };
 
 const toggleMark = async (submission: ContactSubmission) => {
     try {
-        await postJson(`/contact-messages/${submission.id}/toggle-mark`);
-        await router.get(window.location.pathname + window.location.search, {
-            preserveState: false,
-            preserveScroll: true,
-        });
+        const data = await postJson(
+            `/contact-messages/${submission.id}/toggle-mark`,
+        );
+        const idx = submissionRows.value.findIndex(
+            (s) => s.id === submission.id,
+        );
+        if (idx >= 0) {
+            const userId = authUser.value?.id;
+            submissionRows.value[idx] = {
+                ...submissionRows.value[idx],
+                marks:
+                    data?.marked && userId
+                        ? [
+                              {
+                                  id: 0,
+                                  user_id: userId,
+                                  marked_at: new Date().toISOString(),
+                              },
+                          ]
+                        : (submissionRows.value[idx].marks ?? []).filter(
+                              (m) => m.user_id !== userId,
+                          ),
+            };
+        }
     } catch (error) {
         console.error('Error toggling mark:', error);
         alert(t('common.error') + ': ' + (error instanceof Error ? error.message : String(error)));
@@ -656,9 +697,7 @@ const toggleMark = async (submission: ContactSubmission) => {
 
 // Delete submission
 const deleteSubmission = (submission: ContactSubmission) => {
-    if (
-        confirm('Are you sure you want to permanently delete this submission?')
-    ) {
+    if (confirm(t('common.confirm_delete'))) {
         router.delete(contactDestroy(submission.id).url);
     }
 };
@@ -885,7 +924,7 @@ onMounted(async () => {
                         <div
                             class="mb-2 text-xs font-semibold text-muted-foreground"
                         >
-                            Reorder selected columns (drag & drop)
+                            {{ t('columns.reorder') }}
                         </div>
                         <div class="flex flex-wrap gap-2">
                             <div
@@ -1007,9 +1046,10 @@ onMounted(async () => {
                             />
                         </div>
                         <div class="space-y-2">
-                            <label class="text-sm font-medium">{{
-                                t('filter.status')
-                            }}</label>
+                            <label class="flex items-center gap-1.5 text-sm font-medium">
+                                <Star class="h-3.5 w-3.5 text-yellow-500" />
+                                {{ t('filter.status') }}
+                            </label>
                             <select
                                 v-model="selectedStatus"
                                 class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
@@ -1036,13 +1076,13 @@ onMounted(async () => {
                                 <Input
                                     v-model="dateFrom"
                                     type="date"
-                                    placeholder="From"
+                                    :placeholder="t('common.from')"
                                     class="flex-1"
                                 />
                                 <Input
                                     v-model="dateTo"
                                     type="date"
-                                    placeholder="To"
+                                    :placeholder="t('common.to')"
                                     class="flex-1"
                                 />
                             </div>
@@ -1052,28 +1092,28 @@ onMounted(async () => {
                     <!-- Advanced Filters -->
                     <div v-if="showAdvancedFilters" class="mt-4 border-t pt-4">
                         <h3 class="mb-4 text-sm font-semibold">
-                            Advanced Filters
+                            {{ t('filter.advanced') }}
                         </h3>
                         <div
                             class="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3"
                         >
                             <!-- Age Range -->
                             <div class="space-y-2">
-                                <label class="text-sm font-medium"
-                                    >Age Range</label
-                                >
+                                <label class="text-sm font-medium">{{
+                                    t('filter.age_range')
+                                }}</label>
                                 <div class="flex gap-2">
                                     <Input
                                         v-model="ageMin"
                                         type="number"
-                                        placeholder="Min"
+                                        :placeholder="t('common.min')"
                                         min="0"
                                         max="120"
                                     />
                                     <Input
                                         v-model="ageMax"
                                         type="number"
-                                        placeholder="Max"
+                                        :placeholder="t('common.max')"
                                         min="0"
                                         max="120"
                                     />
@@ -1082,21 +1122,21 @@ onMounted(async () => {
 
                             <!-- Birth Year Range -->
                             <div class="space-y-2">
-                                <label class="text-sm font-medium"
-                                    >Birth Year Range</label
-                                >
+                                <label class="text-sm font-medium">{{
+                                    t('filter.birth_year')
+                                }}</label>
                                 <div class="flex gap-2">
                                     <Input
                                         v-model="birthYearMin"
                                         type="number"
-                                        placeholder="From Year"
+                                        :placeholder="t('common.from')"
                                         :min="1900"
                                         :max="new Date().getFullYear()"
                                     />
                                     <Input
                                         v-model="birthYearMax"
                                         type="number"
-                                        placeholder="To Year"
+                                        :placeholder="t('common.to')"
                                         :min="1900"
                                         :max="new Date().getFullYear()"
                                     />
@@ -1105,29 +1145,29 @@ onMounted(async () => {
 
                             <!-- ZIP Code -->
                             <div class="space-y-2">
-                                <label class="text-sm font-medium"
-                                    >ZIP Code</label
-                                >
+                                <label class="text-sm font-medium">{{
+                                    t('filter.plz')
+                                }}</label>
                                 <Input
                                     v-model="zipCode"
-                                    placeholder="ZIP/Postal Code"
+                                    :placeholder="t('filter.plz')"
                                 />
                             </div>
 
                             <!-- PLZ Range -->
                             <div class="space-y-2">
-                                <label class="text-sm font-medium"
-                                    >PLZ Range</label
-                                >
+                                <label class="text-sm font-medium">{{
+                                    t('filter.plz_from')
+                                }} – {{ t('filter.plz_to') }}</label>
                                 <div class="flex gap-2">
                                     <Input
                                         v-model="plzFrom"
-                                        placeholder="From"
+                                        :placeholder="t('common.from')"
                                         inputmode="numeric"
                                     />
                                     <Input
                                         v-model="plzTo"
-                                        placeholder="To"
+                                        :placeholder="t('common.to')"
                                         inputmode="numeric"
                                     />
                                 </div>
@@ -1135,52 +1175,59 @@ onMounted(async () => {
 
                             <!-- City -->
                             <div class="space-y-2">
-                                <label class="text-sm font-medium"
-                                    >City / Place</label
-                                >
+                                <label class="text-sm font-medium">{{
+                                    t('filter.city')
+                                }}</label>
                                 <Input
                                     v-model="city"
-                                    placeholder="City or place of residence"
+                                    :placeholder="t('filter.city')"
                                 />
                             </div>
 
                             <!-- Gender -->
                             <div class="space-y-2">
-                                <label class="text-sm font-medium"
-                                    >Gender</label
-                                >
+                                <label class="text-sm font-medium">{{
+                                    t('filter.gender')
+                                }}</label>
                                 <select
                                     v-model="gender"
                                     class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
                                 >
-                                    <option value="">All</option>
-                                    <option value="m">Male</option>
-                                    <option value="f">Female</option>
-                                    <option value="d">Diverse</option>
+                                    <option value="">{{ t('filter.gender_all') }}</option>
+                                    <option value="m">{{ t('filter.gender_m') }}</option>
+                                    <option value="f">{{ t('filter.gender_f') }}</option>
+                                    <option value="d">{{ t('filter.gender_d') }}</option>
                                 </select>
                             </div>
 
                             <!-- Radius/Distance -->
                             <div class="space-y-2">
-                                <label class="text-sm font-medium"
-                                    >Radius Search (km)</label
-                                >
+                                <label class="text-sm font-medium">{{
+                                    t('filter.radius')
+                                }}</label>
                                 <div class="space-y-2">
                                     <Input
                                         v-model="radius"
                                         type="number"
-                                        placeholder="Radius in km"
+                                        :placeholder="t('filter.radius')"
                                         min="0"
                                         step="0.1"
                                     />
                                     <Input
                                         v-model="radiusPlz"
-                                        placeholder="Center PLZ"
+                                        :placeholder="t('filter.radius_plz')"
                                         inputmode="numeric"
                                     />
                                 </div>
                             </div>
                         </div>
+                    </div>
+
+                    <div
+                        v-if="props.radiusWarning"
+                        class="mt-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800"
+                    >
+                        {{ props.radiusWarning }}
                     </div>
 
                     <!-- Apply Button -->
@@ -1228,7 +1275,7 @@ onMounted(async () => {
                 <CardContent class="p-0">
                     <div
                         v-if="
-                            !submissions.data || submissions.data.length === 0
+                            !submissionRows.length
                         "
                         class="py-12 text-center"
                     >
@@ -1267,18 +1314,28 @@ onMounted(async () => {
                                 <TableHead
                                     v-for="field in visibleFieldList"
                                     :key="`header-${field.key}`"
+                                    draggable="true"
+                                    class="cursor-move select-none hover:bg-muted/50"
                                     :class="
                                         field.type === 'object'
                                             ? 'hidden lg:table-cell'
                                             : ''
                                     "
+                                    @dragstart="onDragStart(field.key)"
+                                    @dragover.prevent
+                                    @drop.prevent="onDropOn(field.key)"
                                 >
-                                    {{ field.label }}
+                                    <span class="inline-flex items-center gap-1">
+                                        <GripVertical
+                                            class="h-3 w-3 shrink-0 text-muted-foreground"
+                                        />
+                                        {{ field.label }}
+                                    </span>
                                 </TableHead>
                                 <TableHead
                                     v-if="visibleColumns.has('date')"
                                     class="w-32"
-                                    >Date</TableHead
+                                    >{{ t('table.date') }}</TableHead
                                 >
                                 <TableHead
                                     v-if="visibleColumns.has('actions')"
@@ -1289,7 +1346,7 @@ onMounted(async () => {
                         </TableHeader>
                         <TableBody>
                             <TableRow
-                                v-for="submission in submissions.data || []"
+                                v-for="submission in submissionRows"
                                 :key="submission.id"
                                 :class="[
                                     'transition-colors hover:bg-gray-50/50',
@@ -1328,18 +1385,29 @@ onMounted(async () => {
                                     <div
                                         class="flex items-center justify-center gap-2"
                                     >
-                                        <CheckCircle2
-                                            v-if="
+                                        <button
+                                            type="button"
+                                            class="inline-flex items-center rounded p-0.5 hover:bg-muted"
+                                            @click="toggleRead(submission)"
+                                            :title="
                                                 isReadByCurrentUser(submission)
+                                                    ? t('action.unread')
+                                                    : t('action.read')
                                             "
-                                            class="h-4 w-4 text-green-600"
-                                            title="Read"
-                                        />
-                                        <AlertCircle
-                                            v-else
-                                            class="h-4 w-4 text-blue-600"
-                                            title="Unread"
-                                        />
+                                        >
+                                            <CheckCircle2
+                                                v-if="
+                                                    isReadByCurrentUser(
+                                                        submission,
+                                                    )
+                                                "
+                                                class="h-4 w-4 text-green-600"
+                                            />
+                                            <AlertCircle
+                                                v-else
+                                                class="h-4 w-4 text-blue-600"
+                                            />
+                                        </button>
                                         <button
                                             type="button"
                                             class="inline-flex items-center"
@@ -1348,8 +1416,8 @@ onMounted(async () => {
                                                 isMarkedByCurrentUser(
                                                     submission,
                                                 )
-                                                    ? 'Unmark'
-                                                    : 'Mark'
+                                                    ? t('action.unmark')
+                                                    : t('action.mark')
                                             "
                                         >
                                             <Star
@@ -1379,7 +1447,13 @@ onMounted(async () => {
                                                     1) > 1
                                             "
                                             class="inline-flex items-center justify-center rounded-full bg-orange-100 px-1.5 py-0.5 text-xs leading-none font-semibold text-orange-700"
-                                            :title="`${submission.duplicate_count} duplicate submissions with the same email/phone/name/PLZ/birthyear`"
+                                            :title="
+                                                t('duplicate.tooltip', {
+                                                    count:
+                                                        submission.duplicate_count ??
+                                                        1,
+                                                })
+                                            "
                                             >×{{
                                                 submission.duplicate_count
                                             }}</span
@@ -1671,31 +1745,29 @@ onMounted(async () => {
         >
             <DialogContent class="sm:max-w-md">
                 <DialogHeader class="space-y-2">
-                    <DialogTitle>Export submissions</DialogTitle>
+                    <DialogTitle>{{ t('export.title') }}</DialogTitle>
                     <DialogDescription>
                         <span v-if="exportScope === 'selected'">
-                            Export {{ selectedRows.size }} selected
-                            submission(s).
+                            {{ t('export.scope_selected', { count: selectedRows.size }) }}
                         </span>
                         <span v-else>
-                            Export the current view with applied filters and
-                            columns.
+                            {{ t('export.scope_current') }}
                         </span>
                     </DialogDescription>
                 </DialogHeader>
                 <div class="mt-4 grid gap-2">
                     <Button variant="outline" @click="runExport('csv')">
                         <FileText class="mr-2 h-4 w-4" />
-                        Export CSV
+                        {{ t('export.csv') }}
                     </Button>
                     <Button variant="outline" @click="runExport('xlsx')">
                         <FileSpreadsheet class="mr-2 h-4 w-4" />
-                        Export Excel
+                        {{ t('export.excel') }}
                     </Button>
                 </div>
                 <DialogFooter class="mt-4">
                     <DialogClose as-child>
-                        <Button variant="ghost">Cancel</Button>
+                        <Button variant="ghost">{{ t('action.cancel') }}</Button>
                     </DialogClose>
                 </DialogFooter>
             </DialogContent>

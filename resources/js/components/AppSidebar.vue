@@ -2,6 +2,7 @@
 import NavFooter from '@/components/NavFooter.vue';
 import NavMain from '@/components/NavMain.vue';
 import NavUser from '@/components/NavUser.vue';
+import LanguageToggle from '@/components/LanguageToggle.vue';
 import {
     Sidebar,
     SidebarContent,
@@ -21,6 +22,9 @@ import { Link, usePage } from '@inertiajs/vue3';
 import { LayoutGrid, Users, MessageSquare } from 'lucide-vue-next';
 import { computed } from 'vue';
 import AppLogo from './AppLogo.vue';
+import { useI18n } from '@/utils/i18n';
+
+const { t } = useI18n();
 
 const page = usePage();
 const user = computed(() => page.props.auth.user);
@@ -44,7 +48,7 @@ const getDashboardUrl = () => {
 const mainNavItems = computed<NavItem[]>(() => {
     const items: NavItem[] = [
         {
-            title: 'Dashboard',
+            title: t('nav.dashboard'),
             href: getDashboardUrl(),
             icon: LayoutGrid,
         },
@@ -53,7 +57,7 @@ const mainNavItems = computed<NavItem[]>(() => {
     // Add User Management for superadmins
     if (userHasRole('superadmin')) {
         items.push({
-            title: 'User Management',
+            title: t('nav.users'),
             href: usersIndex().url,
             icon: Users,
         });
@@ -84,6 +88,9 @@ const footerNavItems: NavItem[] = [];
         </SidebarContent>
 
         <SidebarFooter>
+            <div class="px-2 py-2">
+                <LanguageToggle />
+            </div>
             <NavFooter :items="footerNavItems" />
             <NavUser />
         </SidebarFooter>

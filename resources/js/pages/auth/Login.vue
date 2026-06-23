@@ -13,11 +13,14 @@ import { request } from '@/routes/password';
 import { useForm, Head, router } from '@inertiajs/vue3';
 import { LoaderCircle, ShieldCheck, User } from 'lucide-vue-next';
 import { ref } from 'vue';
+import { useI18n } from '@/utils/i18n';
 
 defineProps<{
     status?: string;
     canResetPassword: boolean;
 }>();
+
+const { t } = useI18n();
 
 const form = useForm({
     email: '',
@@ -52,10 +55,10 @@ const submit = () => {
 
 <template>
     <AuthBase
-        title="Log in to your account"
-        description="Enter your email and password below to log in"
+        :title="t('auth.login_title')"
+        :description="t('auth.login_desc')"
     >
-        <Head title="Log in" />
+        <Head :title="t('auth.login')" />
 
         <div
             v-if="status"

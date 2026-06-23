@@ -35,6 +35,7 @@ import {
     Search,
 } from 'lucide-vue-next';
 import { computed, ref, watch } from 'vue';
+import { useI18n } from '@/utils/i18n';
 
 interface Form {
     webform_id: string;
@@ -68,10 +69,11 @@ interface Props {
 }
 
 const props = defineProps<Props>();
+const { t, locale } = useI18n();
 
 const breadcrumbs: BreadcrumbItem[] = [
     {
-        title: 'Form Center',
+        title: t('dashboard.title'),
         href: userDashboard().url,
     },
     {
@@ -112,9 +114,9 @@ const getFormUrl = (webformId: string): string => {
 };
 
 const formatDate = (dateString: string): string => {
-    if (!dateString) return 'N/A';
+    if (!dateString) return t('common.na');
     const date = new Date(dateString);
-    return date.toLocaleDateString('en-US', {
+    return date.toLocaleDateString(locale.value === 'de' ? 'de-DE' : 'en-US', {
         year: 'numeric',
         month: 'short',
         day: 'numeric',
@@ -122,9 +124,9 @@ const formatDate = (dateString: string): string => {
 };
 
 const formatDateTime = (dateString: string): string => {
-    if (!dateString) return 'N/A';
+    if (!dateString) return t('common.na');
     const date = new Date(dateString);
-    return date.toLocaleString('en-US', {
+    return date.toLocaleString(locale.value === 'de' ? 'de-DE' : 'en-US', {
         year: 'numeric',
         month: 'short',
         day: 'numeric',
@@ -216,7 +218,7 @@ const getSortClass = (column: string) => {
 </script>
 
 <template>
-    <Head :title="`${stationName} - Forms Overview`" />
+    <Head :title="`${stationName} - ${t('station.forms_overview')}`" />
 
     <AppLayout :breadcrumbs="breadcrumbs">
         <div class="flex h-full flex-1 flex-col gap-6 overflow-x-auto rounded-xl p-4">
@@ -225,7 +227,7 @@ const getSortClass = (column: string) => {
                 <Link :href="userDashboard().url">
                     <Button variant="ghost" size="sm">
                         <ArrowLeft class="mr-2 h-4 w-4" />
-                        Back to Dashboard
+                        {{ t('station.back') }}
                     </Button>
                 </Link>
             </div>
@@ -239,7 +241,7 @@ const getSortClass = (column: string) => {
                             <div>
                                 <CardTitle class="text-lg font-bold">{{ stationName }}</CardTitle>
                                 <div class="text-xs mt-0.5 opacity-90">
-                                    {{ forms.total }} forms • {{ props.totalEntryCount || 0 }} entries
+                                    {{ t('dashboard.forms_count', { count: forms.total }) }} • {{ t('dashboard.entries_count', { count: props.totalEntryCount || 0 }) }}
                                 </div>
                             </div>
                         </div>
@@ -253,19 +255,19 @@ const getSortClass = (column: string) => {
             <!-- Filters -->
             <Card>
                 <CardHeader>
-                    <CardTitle class="text-lg">Search & Filter</CardTitle>
-                    <CardDescription>Search forms by name or ID</CardDescription>
+                    <CardTitle class="text-lg">{{ t('station.search_filter') }}</CardTitle>
+                    <CardDescription>{{ t('station.search_placeholder') }}</CardDescription>
                 </CardHeader>
                 <CardContent>
                     <div class="grid grid-cols-1 gap-4 md:grid-cols-3">
                         <!-- Search -->
                         <div class="space-y-2">
-                            <Label>Search</Label>
+                            <Label>{{ t('filter.search') }}</Label>
                             <div class="relative">
                                 <Search class="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
                                 <Input
                                     v-model="searchQuery"
-                                    placeholder="Search by form name or ID..."
+                                    :placeholder="t('station.search_placeholder')"
                                     class="pl-8"
                                 />
                             </div>
@@ -273,7 +275,7 @@ const getSortClass = (column: string) => {
 
                         <!-- Per Page -->
                         <div class="space-y-2">
-                            <Label>Items per page</Label>
+                            <Label>{{ t('station.per_page') }}</Label>
                             <Select v-model="perPage">
                                 <SelectTrigger>
                                     <SelectValue />
@@ -296,10 +298,10 @@ const getSortClass = (column: string) => {
                     <div class="flex items-center justify-between">
                         <div>
                             <CardTitle>
-                                Forms ({{ forms.total }})
+                                {{ t('station.forms_overview') }} ({{ forms.total }})
                             </CardTitle>
                             <CardDescription>
-                                Showing {{ forms.from }}-{{ forms.to }} of {{ forms.total }} forms
+                                {{ t('station.showing', { from: forms.from, to: forms.to, total: forms.total }) }}
                             </CardDescription>
                         </div>
                     </div>
@@ -314,7 +316,7 @@ const getSortClass = (column: string) => {
                                         @click="toggleSort('submission_form')"
                                     >
                                         <div class="flex items-center gap-2">
-                                            Form Name
+                                            {{ t('dashboard.form_name') }}
                                             <component 
                                                 :is="getSortIcon('submission_form')" 
                                                 v-if="getSortIcon('submission_form')"
@@ -327,7 +329,7 @@ const getSortClass = (column: string) => {
                                         @click="toggleSort('webform_id')"
                                     >
                                         <div class="flex items-center gap-2">
-                                            Form ID
+                                            {{ t('station.form_id') }}
                                             <component 
                                                 :is="getSortIcon('webform_id')" 
                                                 v-if="getSortIcon('webform_id')"
@@ -340,7 +342,7 @@ const getSortClass = (column: string) => {
                                         @click="toggleSort('entry_count')"
                                     >
                                         <div class="flex items-center gap-2">
-                                            Entries
+                                            {{ t('dashboard.entries') }}
                                             <component 
                                                 :is="getSortIcon('entry_count')" 
                                                 v-if="getSortIcon('entry_count')"
@@ -353,7 +355,7 @@ const getSortClass = (column: string) => {
                                         @click="toggleSort('created_at')"
                                     >
                                         <div class="flex items-center gap-2">
-                                            Created
+                                            {{ t('station.created') }}
                                             <component 
                                                 :is="getSortIcon('created_at')" 
                                                 v-if="getSortIcon('created_at')"
@@ -366,7 +368,7 @@ const getSortClass = (column: string) => {
                                         @click="toggleSort('updated_at')"
                                     >
                                         <div class="flex items-center gap-2">
-                                            Last Modified
+                                            {{ t('station.updated') }}
                                             <component 
                                                 :is="getSortIcon('updated_at')" 
                                                 v-if="getSortIcon('updated_at')"
@@ -384,9 +386,9 @@ const getSortClass = (column: string) => {
                                 >
                                     <TableCell colspan="6" class="text-center py-8 text-muted-foreground">
                                         <FileText class="mx-auto h-12 w-12 mb-2 opacity-50" />
-                                        <p>No forms found</p>
+                                        <p>{{ t('station.no_forms') }}</p>
                                         <p class="text-sm mt-1">
-                                            {{ searchQuery ? 'Try adjusting your search criteria' : 'Forms will appear when webhooks are received' }}
+                                            {{ searchQuery ? t('station.no_forms_desc') : t('dashboard.no_forms_station_desc') }}
                                         </p>
                                     </TableCell>
                                 </TableRow>
@@ -458,7 +460,7 @@ const getSortClass = (column: string) => {
                         @click="goToPage(forms.current_page - 1)"
                     >
                         <ArrowLeft class="mr-2 h-4 w-4" />
-                        Previous
+                        {{ t('common.previous') }}
                     </Button>
                     <div class="flex items-center gap-1">
                         <Button
@@ -481,7 +483,7 @@ const getSortClass = (column: string) => {
                         :disabled="!hasNextPage"
                         @click="goToPage(forms.current_page + 1)"
                     >
-                        Next
+                        {{ t('common.next') }}
                         <ArrowRight class="ml-2 h-4 w-4" />
                     </Button>
                 </div>

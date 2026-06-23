@@ -26,7 +26,7 @@ class CheckUserActive
                 $request->session()->regenerateToken();
                 
                 return redirect()->route('login')->withErrors([
-                    'email' => 'Your account has been deactivated. Please contact the administrator.'
+                    'email' => __('messages.account_deactivated'),
                 ]);
             }
         }

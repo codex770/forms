@@ -1,4 +1,5 @@
 import { computed } from 'vue';
+import { usePage } from '@inertiajs/vue3';
 
 type Locale = 'de' | 'en';
 
@@ -107,6 +108,89 @@ const translations: Record<Locale, Record<string, string>> = {
         'common.error': 'Fehler',
         'common.success': 'Erfolgreich',
         'common.confirm_delete': 'Sind Sie sicher, dass Sie diese Einreichung dauerhaft löschen möchten?',
+        'common.confirm_bulk_delete': 'Sind Sie sicher, dass Sie {count} Einreichung(en) löschen möchten?',
+        'common.from': 'Von',
+        'common.to': 'Bis',
+        'common.min': 'Min',
+        'common.max': 'Max',
+        'common.na': 'k. A.',
+        'common.previous': 'Zurück',
+        'common.next': 'Weiter',
+        'common.platform': 'Plattform',
+        'common.unknown': 'Unbekannt',
+        'common.no_email': 'Keine E-Mail angegeben',
+        'common.no_message': 'Kein Nachrichteninhalt',
+
+        // Dashboard
+        'dashboard.title': 'Form Center',
+        'dashboard.subtitle': 'Übersicht aller verfügbaren Formulare und Einreichungen',
+        'dashboard.no_forms': 'Noch keine Formulare',
+        'dashboard.no_forms_desc': 'Formulare erscheinen hier, sobald Einreichungen über Webhooks eingehen.',
+        'dashboard.no_forms_station': 'Noch keine Formulare',
+        'dashboard.no_forms_station_desc': 'Formulare erscheinen, sobald Webhooks eingehen.',
+        'dashboard.forms_count': '{count} Formulare',
+        'dashboard.entries_count': '{count} Einträge',
+        'dashboard.form_name': 'Formularname',
+        'dashboard.entries': 'Einträge',
+        'dashboard.total_stations': 'Sender gesamt',
+        'dashboard.total_stations_desc': 'Aktive Radiosender',
+        'dashboard.radio_stations': 'Radiosender',
+        'dashboard.total_forms': 'Formulare gesamt',
+        'dashboard.total_forms_desc': 'Eindeutige Webformulare',
+        'dashboard.active_forms': 'Aktive Formulare',
+        'dashboard.total_submissions': 'Einreichungen gesamt',
+        'dashboard.total_submissions_desc': 'Alle Einträge zusammen',
+        'dashboard.total_entries': 'Einträge gesamt',
+
+        // Station overview
+        'station.back': 'Zurück zum Dashboard',
+        'station.forms_overview': 'Formularübersicht',
+        'station.search_filter': 'Suche & Filter',
+        'station.search_placeholder': 'Formulare durchsuchen…',
+        'station.per_page': 'Pro Seite',
+        'station.showing': 'Zeige {from}–{to} von {total}',
+        'station.form_id': 'Formular-ID',
+        'station.submission_form': 'Einreichungsformular',
+        'station.entry_count': 'Anzahl Einträge',
+        'station.created': 'Erstellt',
+        'station.updated': 'Aktualisiert',
+        'station.no_forms': 'Keine Formulare gefunden',
+        'station.no_forms_desc': 'Keine Formulare entsprechen Ihrer Suche.',
+
+        // Export
+        'export.title': 'Einreichungen exportieren',
+        'export.csv': 'CSV exportieren',
+        'export.excel': 'Excel exportieren',
+        'export.scope_current': 'Aktuelle Ansicht',
+        'export.scope_selected': 'Ausgewählte ({count})',
+
+        // Duplicate tooltip
+        'duplicate.tooltip': '{count} doppelte Einreichungen mit gleicher E-Mail/Telefon/Name/PLZ/Geburtsjahr',
+
+        // Radius warning
+        'filter.radius_warning': 'Mittelpunkt-PLZ konnte nicht aufgelöst werden. Bitte eine gültige PLZ eingeben.',
+
+        // Auth
+        'auth.login_title': 'Bei Ihrem Konto anmelden',
+        'auth.login_desc': 'Geben Sie E-Mail und Passwort ein, um sich anzumelden',
+        'auth.login': 'Anmelden',
+        'auth.email': 'E-Mail-Adresse',
+        'auth.password': 'Passwort',
+        'auth.remember': 'Angemeldet bleiben',
+        'auth.forgot_password': 'Passwort vergessen?',
+        'auth.settings': 'Einstellungen',
+        'auth.settings_desc': 'Profil und Kontoeinstellungen verwalten',
+        'auth.logout': 'Abmelden',
+        'auth.two_factor': 'Zwei-Faktor-Authentifizierung',
+        'auth.appearance': 'Erscheinungsbild',
+
+        // Contact detail
+        'contact.back_form': 'Zurück zum Formular',
+        'contact.back_messages': 'Zurück zu Nachrichten',
+        'contact.mark_read': 'Als gelesen markieren',
+        'contact.mark_unread': 'Als ungelesen markieren',
+        'contact.read': 'Gelesen',
+        'contact.unread': 'Ungelesen',
     },
     en: {
         // Navigation
@@ -212,6 +296,89 @@ const translations: Record<Locale, Record<string, string>> = {
         'common.error': 'Error',
         'common.success': 'Success',
         'common.confirm_delete': 'Are you sure you want to permanently delete this submission?',
+        'common.confirm_bulk_delete': 'Are you sure you want to delete {count} submission(s)?',
+        'common.from': 'From',
+        'common.to': 'To',
+        'common.min': 'Min',
+        'common.max': 'Max',
+        'common.na': 'N/A',
+        'common.previous': 'Previous',
+        'common.next': 'Next',
+        'common.platform': 'Platform',
+        'common.unknown': 'Unknown',
+        'common.no_email': 'No email provided',
+        'common.no_message': 'No message content',
+
+        // Dashboard
+        'dashboard.title': 'Form Center',
+        'dashboard.subtitle': 'Overview of all available forms and their submissions',
+        'dashboard.no_forms': 'No Forms Yet',
+        'dashboard.no_forms_desc': 'Forms will appear here once submissions are received from webhooks.',
+        'dashboard.no_forms_station': 'No forms yet',
+        'dashboard.no_forms_station_desc': 'Forms will appear when webhooks are received',
+        'dashboard.forms_count': '{count} forms',
+        'dashboard.entries_count': '{count} entries',
+        'dashboard.form_name': 'Form Name',
+        'dashboard.entries': 'Entries',
+        'dashboard.total_stations': 'Total Stations',
+        'dashboard.total_stations_desc': 'Active radio stations',
+        'dashboard.radio_stations': 'Radio stations',
+        'dashboard.total_forms': 'Total Forms',
+        'dashboard.total_forms_desc': 'Unique webforms',
+        'dashboard.active_forms': 'Active forms',
+        'dashboard.total_submissions': 'Total Submissions',
+        'dashboard.total_submissions_desc': 'All entries combined',
+        'dashboard.total_entries': 'Total entries',
+
+        // Station overview
+        'station.back': 'Back to Dashboard',
+        'station.forms_overview': 'Forms Overview',
+        'station.search_filter': 'Search & Filter',
+        'station.search_placeholder': 'Search forms...',
+        'station.per_page': 'Per page',
+        'station.showing': 'Showing {from}–{to} of {total}',
+        'station.form_id': 'Form ID',
+        'station.submission_form': 'Submission Form',
+        'station.entry_count': 'Entry Count',
+        'station.created': 'Created',
+        'station.updated': 'Updated',
+        'station.no_forms': 'No forms found',
+        'station.no_forms_desc': 'No forms match your search.',
+
+        // Export
+        'export.title': 'Export submissions',
+        'export.csv': 'Export CSV',
+        'export.excel': 'Export Excel',
+        'export.scope_current': 'Current view',
+        'export.scope_selected': 'Selected ({count})',
+
+        // Duplicate tooltip
+        'duplicate.tooltip': '{count} duplicate submissions with the same email/phone/name/PLZ/birth year',
+
+        // Radius warning
+        'filter.radius_warning': 'Center PLZ could not be resolved. Please enter a valid postal code.',
+
+        // Auth
+        'auth.login_title': 'Log in to your account',
+        'auth.login_desc': 'Enter your email and password below to log in',
+        'auth.login': 'Log in',
+        'auth.email': 'Email address',
+        'auth.password': 'Password',
+        'auth.remember': 'Remember me',
+        'auth.forgot_password': 'Forgot password?',
+        'auth.settings': 'Settings',
+        'auth.settings_desc': 'Manage your profile and account settings',
+        'auth.logout': 'Log out',
+        'auth.two_factor': 'Two-Factor Auth',
+        'auth.appearance': 'Appearance',
+
+        // Contact detail
+        'contact.back_form': 'Back to Form',
+        'contact.back_messages': 'Back to Messages',
+        'contact.mark_read': 'Mark as Read',
+        'contact.mark_unread': 'Mark as Unread',
+        'contact.read': 'Read',
+        'contact.unread': 'Unread',
     },
 };
 
@@ -220,7 +387,11 @@ const translations: Record<Locale, Record<string, string>> = {
  * Usage: const { t, locale } = useI18n();
  */
 export function useI18n() {
-    const locale = computed<Locale>(() => 'de');
+    const page = usePage();
+    const locale = computed<Locale>(() => {
+        const l = page.props.locale as string | undefined;
+        return l === 'en' ? 'en' : 'de';
+    });
 
     const t = (key: string, vars?: Record<string, string | number>): string => {
         const dict = translations[locale.value] ?? translations['de'];

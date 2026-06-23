@@ -60,38 +60,18 @@ class ContactController extends Controller
         $radius = $request->get('radius');
         $radiusPlz = $request->get('radius_plz');
 
-        // Resolve radius center from PLZ (best-effort; no external service)
+        // Resolve radius center from PLZ (submission geo, then config fallback)
         $radiusLat = null;
         $radiusLng = null;
+        $radiusWarning = null;
         if ($radius && $radiusPlz) {
-            $cacheKey = 'plz_center:' . preg_replace('/\\D+/', '', (string) $radiusPlz);
-            $center = \Cache::remember($cacheKey, now()->addHours(12), function () use ($radiusPlz) {
-                $plz = preg_replace('/\\D+/', '', (string) $radiusPlz);
-                if ($plz === '') return null;
-
-                $submission = ContactSubmission::query()
-                    ->where(function ($q) use ($plz) {
-                        $q->whereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.plz")) = ?', [$plz])
-                            ->orWhereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.zip")) = ?', [$plz])
-                            ->orWhereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.zip_code")) = ?', [$plz])
-                            ->orWhereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.postal_code")) = ?', [$plz]);
-                    })
-                    ->whereRaw('JSON_EXTRACT(data, "$.latitude") IS NOT NULL')
-                    ->whereRaw('JSON_EXTRACT(data, "$.longitude") IS NOT NULL')
-                    ->orderByDesc('created_at')
-                    ->first(['data']);
-
-                if (!$submission || !is_array($submission->data)) return null;
-                $lat = $submission->data['latitude'] ?? null;
-                $lng = $submission->data['longitude'] ?? null;
-                if ($lat === null || $lng === null) return null;
-
-                return ['lat' => (float) $lat, 'lng' => (float) $lng];
-            });
-
-            if (is_array($center) && isset($center['lat'], $center['lng'])) {
+            $center = $this->resolvePlzCenter((string) $radiusPlz);
+            if ($center) {
                 $radiusLat = $center['lat'];
                 $radiusLng = $center['lng'];
+            } else {
+                $radiusWarning = __('messages.radius_plz_unresolved');
+                $request->attributes->set('radius_warning', $radiusWarning);
             }
         }
 
@@ -249,17 +229,38 @@ class ContactController extends Controller
                 });
             })
             ->when($radius && $radiusLat !== null && $radiusLng !== null, function ($q) use ($radius, $radiusLat, $radiusLng) {
-                $q->whereRaw('(
-                    JSON_EXTRACT(data, "$.latitude") IS NOT NULL AND
-                    JSON_EXTRACT(data, "$.longitude") IS NOT NULL AND
-                    6371 * acos(
-                        cos(radians(?)) * 
-                        cos(radians(CAST(JSON_EXTRACT(data, "$.latitude") AS DECIMAL(10,8)))) * 
-                        cos(radians(CAST(JSON_EXTRACT(data, "$.longitude") AS DECIMAL(10,8))) - radians(?)) + 
-                        sin(radians(?)) * 
-                        sin(radians(CAST(JSON_EXTRACT(data, "$.latitude") AS DECIMAL(10,8))))
-                    )
-                ) <= ?', [$radiusLat, $radiusLng, $radiusLat, $radius]);
+                $nearbyPlzs = $this->getPlzWithinRadius($radiusLat, $radiusLng, (float) $radius);
+                $q->where(function ($query) use ($radius, $radiusLat, $radiusLng, $nearbyPlzs) {
+                    $query->whereRaw('(
+                        JSON_EXTRACT(data, "$.latitude") IS NOT NULL AND
+                        JSON_EXTRACT(data, "$.longitude") IS NOT NULL AND
+                        6371 * acos(
+                            LEAST(1, GREATEST(-1,
+                                cos(radians(?)) *
+                                cos(radians(CAST(JSON_EXTRACT(data, "$.latitude") AS DECIMAL(10,8)))) *
+                                cos(radians(CAST(JSON_EXTRACT(data, "$.longitude") AS DECIMAL(10,8))) - radians(?)) +
+                                sin(radians(?)) *
+                                sin(radians(CAST(JSON_EXTRACT(data, "$.latitude") AS DECIMAL(10,8))))
+                            ))
+                        )
+                    ) <= ?', [$radiusLat, $radiusLng, $radiusLat, $radius]);
+
+                    if (!empty($nearbyPlzs)) {
+                        $query->orWhere(function ($sub) use ($nearbyPlzs) {
+                            foreach (['plz', 'zip', 'zip_code', 'postal_code'] as $i => $key) {
+                                $col = "JSON_UNQUOTE(JSON_EXTRACT(data, \"$.{$key}\"))";
+                                if ($i === 0) {
+                                    $sub->whereIn(\DB::raw($col), $nearbyPlzs);
+                                } else {
+                                    $sub->orWhereIn(\DB::raw($col), $nearbyPlzs);
+                                }
+                            }
+                        });
+                    }
+                });
+            })
+            ->when($radius && $radiusPlz && $radiusLat === null, function ($q) {
+                $q->whereRaw('1 = 0');
             });
 
         if ($status === 'read') {
@@ -273,6 +274,81 @@ class ContactController extends Controller
         }
 
         return $query;
+    }
+
+    /**
+     * Resolve PLZ to lat/lng: try submission geo data, then config plz_centers.
+     */
+    private function resolvePlzCenter(string $radiusPlz): ?array
+    {
+        $plz = preg_replace('/\D+/', '', $radiusPlz);
+        if ($plz === '') {
+            return null;
+        }
+
+        $plz = str_pad($plz, 5, '0', STR_PAD_LEFT);
+
+        $cacheKey = 'plz_center:' . $plz;
+        return \Cache::remember($cacheKey, now()->addHours(12), function () use ($plz) {
+            $submission = ContactSubmission::query()
+                ->where(function ($q) use ($plz) {
+                    $q->whereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.plz")) = ?', [$plz])
+                        ->orWhereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.zip")) = ?', [$plz])
+                        ->orWhereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.zip_code")) = ?', [$plz])
+                        ->orWhereRaw('JSON_UNQUOTE(JSON_EXTRACT(data, "$.postal_code")) = ?', [$plz]);
+                })
+                ->whereRaw('JSON_EXTRACT(data, "$.latitude") IS NOT NULL')
+                ->whereRaw('JSON_EXTRACT(data, "$.longitude") IS NOT NULL')
+                ->orderByDesc('created_at')
+                ->first(['data']);
+
+            if ($submission && is_array($submission->data)) {
+                $lat = $submission->data['latitude'] ?? null;
+                $lng = $submission->data['longitude'] ?? null;
+                if ($lat !== null && $lng !== null) {
+                    return ['lat' => (float) $lat, 'lng' => (float) $lng];
+                }
+            }
+
+            $config = config('plz_centers.' . $plz);
+            if (is_array($config) && count($config) >= 2) {
+                return ['lat' => (float) $config[0], 'lng' => (float) $config[1]];
+            }
+
+            return null;
+        });
+    }
+
+    /**
+     * Return PLZ codes within radius (km) of a center point using config plz_centers.
+     */
+    private function getPlzWithinRadius(float $centerLat, float $centerLng, float $radiusKm): array
+    {
+        $centers = config('plz_centers', []);
+        $nearby = [];
+
+        foreach ($centers as $plz => $coords) {
+            if (!is_array($coords) || count($coords) < 2) {
+                continue;
+            }
+            $dist = $this->haversineKm($centerLat, $centerLng, (float) $coords[0], (float) $coords[1]);
+            if ($dist <= $radiusKm) {
+                $nearby[] = (string) $plz;
+            }
+        }
+
+        return $nearby;
+    }
+
+    private function haversineKm(float $lat1, float $lng1, float $lat2, float $lng2): float
+    {
+        $earthRadius = 6371;
+        $dLat = deg2rad($lat2 - $lat1);
+        $dLng = deg2rad($lng2 - $lng1);
+        $a = sin($dLat / 2) ** 2
+            + cos(deg2rad($lat1)) * cos(deg2rad($lat2)) * sin($dLng / 2) ** 2;
+
+        return $earthRadius * 2 * atan2(sqrt($a), sqrt(1 - $a));
     }
 
     /**
@@ -763,7 +839,7 @@ class ContactController extends Controller
             ->first();
 
         if (!$formInfo) {
-            abort(404, 'Form not found');
+            abort(404, __('messages.form_not_found'));
         }
 
         $formName = $formInfo->submission_form ?? $webformId;
@@ -881,6 +957,7 @@ class ContactController extends Controller
             'sortColumn' => $sortColumn,
             'sortDirection' => $sortDirection,
             'retentionDays' => ContactRetentionRule::effectiveDaysFor($webformId),
+            'radiusWarning' => $request->attributes->get('radius_warning'),
         ]);
     }
 
@@ -1095,11 +1172,11 @@ class ContactController extends Controller
         if ($existingRead) {
             // If already read, remove the read record (mark as unread)
             $existingRead->delete();
-            $message = 'Marked as unread';
+            $message = __('messages.marked_as_unread');
         } else {
             // If not read, mark as read
             $submission->markAsReadBy($userId);
-            $message = 'Marked as read';
+            $message = __('messages.marked_as_read');
         }
 
         // Reload reads with user info for accurate response
@@ -1138,10 +1215,10 @@ class ContactController extends Controller
 
         if ($existing) {
             $existing->delete();
-            $message = 'Unmarked';
+            $message = __('messages.unmarked');
         } else {
             $submission->markBy($userId);
-            $message = 'Marked';
+            $message = __('messages.marked');
         }
 
         $submission->load([
@@ -1165,9 +1242,9 @@ class ContactController extends Controller
         try {
             $submission->delete();
 
-            return redirect()->route('contact.index')->with('success', 'Contact submission deleted permanently.');
+            return redirect()->route('contact.index')->with('success', __('messages.submission_deleted'));
         } catch (\Exception $e) {
-            return back()->with('error', 'Failed to delete contact submission.');
+            return back()->with('error', __('messages.submission_delete_failed'));
         }
     }
 }

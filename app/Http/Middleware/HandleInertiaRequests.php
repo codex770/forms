@@ -45,7 +45,7 @@ class HandleInertiaRequests extends Middleware
             'auth' => [
                 'user' => $request->user()?->load('roles'),
             ],
-            'locale' => 'de',
+            'locale' => $request->user()?->locale ?? 'de',
             'sidebarOpen' => ! $request->hasCookie('sidebar_state') || $request->cookie('sidebar_state') === 'true',
         ];
     }

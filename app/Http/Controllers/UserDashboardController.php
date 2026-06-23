@@ -108,7 +108,7 @@ class UserDashboardController extends Controller
 
         // Validate station
         if (!isset($allStations[$station])) {
-            abort(404, 'Station not found');
+            abort(404, __('messages.station_not_found'));
         }
 
         $stationName = $allStations[$station];

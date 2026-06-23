@@ -84,7 +84,7 @@ class UserController extends Controller
         $user = User::create($validated);
         $user->assignRole($validated['role']);
 
-        return redirect()->route('users.index')->with('success', 'User created successfully.');
+        return redirect()->route('users.index')->with('success', __('messages.user_created'));
     }
 
     /**
@@ -134,7 +134,7 @@ class UserController extends Controller
             $user->syncRoles([$validated['role']]);
         }
 
-        return redirect()->route('users.index')->with('success', 'User updated successfully.');
+        return redirect()->route('users.index')->with('success', __('messages.user_updated'));
     }
 
     /**
@@ -144,12 +144,12 @@ class UserController extends Controller
     {
         // Prevent superadmin from deleting themselves
         if ($user->id === auth()->id()) {
-            return redirect()->back()->with('error', 'You cannot delete your own account.');
+            return redirect()->back()->with('error', __('messages.cannot_delete_self'));
         }
 
         $user->delete();
 
-        return redirect()->route('users.index')->with('success', 'User deactivated successfully.');
+        return redirect()->route('users.index')->with('success', __('messages.user_deleted'));
     }
 
     /**
@@ -160,7 +160,7 @@ class UserController extends Controller
         $user = User::onlyTrashed()->findOrFail($id);
         $user->restore();
 
-        return redirect()->route('users.index')->with('success', 'User restored successfully.');
+        return redirect()->route('users.index')->with('success', __('messages.user_restored'));
     }
 
     /**
@@ -173,11 +173,11 @@ class UserController extends Controller
         
         // Prevent superadmin from permanently deleting themselves
         if ($user->id === auth()->id()) {
-            return redirect()->back()->with('error', 'You cannot permanently delete your own account.');
+            return redirect()->back()->with('error', __('messages.cannot_permanently_delete_self'));
         }
 
         $user->forceDelete();
 
-        return redirect()->route('users.index')->with('success', 'User permanently deleted.');
+        return redirect()->route('users.index')->with('success', __('messages.user_permanently_deleted'));
     }
 }

@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { FileText, ArrowRight, Radio } from 'lucide-vue-next';
+import { useI18n } from '@/utils/i18n';
 
 interface WebForm {
     webform_id: string;
@@ -33,10 +34,11 @@ interface Props {
 }
 
 const props = defineProps<Props>();
+const { t } = useI18n();
 
 const breadcrumbs: BreadcrumbItem[] = [
     {
-        title: 'Form Center',
+        title: t('dashboard.title'),
         href: userDashboard().url,
     },
 ];
@@ -84,15 +86,15 @@ const getSenderUrl = (station: string): string => {
 </script>
 
 <template>
-    <Head title="Form Center Dashboard" />
+    <Head :title="t('dashboard.title')" />
 
     <AppLayout :breadcrumbs="breadcrumbs">
         <div class="flex h-full flex-1 flex-col gap-6 overflow-x-auto rounded-xl p-4">
             <div class="flex items-center justify-between">
                 <div>
-                    <h1 class="text-3xl font-bold tracking-tight">Form Center</h1>
+                    <h1 class="text-3xl font-bold tracking-tight">{{ t('dashboard.title') }}</h1>
                     <p class="text-muted-foreground mt-1">
-                        Overview of all available forms and their submissions
+                        {{ t('dashboard.subtitle') }}
                     </p>
                 </div>
                 <Badge variant="secondary" class="h-8 px-3">USER</Badge>
@@ -101,9 +103,9 @@ const getSenderUrl = (station: string): string => {
             <!-- Stations & Forms Overview -->
             <div v-if="props.stations.length === 0" class="text-center py-12">
                 <FileText class="mx-auto h-12 w-12 text-muted-foreground" />
-                <h3 class="mt-4 text-lg font-semibold">No Forms Yet</h3>
+                <h3 class="mt-4 text-lg font-semibold">{{ t('dashboard.no_forms') }}</h3>
                 <p class="text-muted-foreground mt-2">
-                    Forms will appear here once submissions are received from webhooks.
+                    {{ t('dashboard.no_forms_desc') }}
                 </p>
             </div>
 
@@ -124,7 +126,7 @@ const getSenderUrl = (station: string): string => {
                                     <div>
                                         <CardTitle class="text-lg font-bold">{{ station.stationName }}</CardTitle>
                                         <div class="text-xs mt-0.5 opacity-90">
-                                            {{ station.types?.reduce((sum, type) => sum + type.forms.length, 0) || 0 }} forms • {{ station.totalCount }} entries
+                                            {{ t('dashboard.forms_count', { count: station.types?.reduce((sum, type) => sum + type.forms.length, 0) || 0 }) }} • {{ t('dashboard.entries_count', { count: station.totalCount }) }}
                                         </div>
                                     </div>
                                 </div>
@@ -139,9 +141,9 @@ const getSenderUrl = (station: string): string => {
                         <!-- Empty State -->
                         <div v-if="!station.types || station.types.length === 0" class="flex flex-col items-center justify-center py-8 text-center">
                             <FileText class="h-10 w-10 text-muted-foreground/50 mb-2" />
-                            <p class="text-sm text-muted-foreground">No forms yet</p>
+                            <p class="text-sm text-muted-foreground">{{ t('dashboard.no_forms_station') }}</p>
                             <p class="text-xs text-muted-foreground/70 mt-1">
-                                Forms will appear when webhooks are received
+                                {{ t('dashboard.no_forms_station_desc') }}
                             </p>
                         </div>
 
@@ -152,7 +154,7 @@ const getSenderUrl = (station: string): string => {
                                 <div class="bg-muted/30 px-3 py-2 sticky top-0">
                                     <div class="flex items-center justify-between">
                                         <span class="text-xs font-semibold text-muted-foreground">{{ formType.type }}</span>
-                                        <span class="text-xs text-muted-foreground">{{ formType.totalCount }} entries</span>
+                                        <span class="text-xs text-muted-foreground">{{ t('dashboard.entries_count', { count: formType.totalCount }) }}</span>
                                     </div>
                                 </div>
                                 
@@ -160,8 +162,8 @@ const getSenderUrl = (station: string): string => {
                             <table class="w-full text-sm">
                                     <thead class="bg-muted/20">
                                         <tr>
-                                            <th class="text-left font-medium px-3 py-1.5 text-xs">Form Name</th>
-                                            <th class="text-right font-medium px-3 py-1.5 text-xs w-20">Entries</th>
+                                            <th class="text-left font-medium px-3 py-1.5 text-xs">{{ t('dashboard.form_name') }}</th>
+                                            <th class="text-right font-medium px-3 py-1.5 text-xs w-20">{{ t('dashboard.entries') }}</th>
                                         <th class="w-8"></th>
                                     </tr>
                                 </thead>
@@ -204,38 +206,38 @@ const getSenderUrl = (station: string): string => {
             <div v-if="props.stations.length > 0" class="grid gap-4 md:grid-cols-3 mt-8">
                 <Card>
                     <CardHeader>
-                        <CardTitle>Total Stations</CardTitle>
-                        <CardDescription>Active radio stations</CardDescription>
+                        <CardTitle>{{ t('dashboard.total_stations') }}</CardTitle>
+                        <CardDescription>{{ t('dashboard.total_stations_desc') }}</CardDescription>
                     </CardHeader>
                     <CardContent>
                         <div class="text-3xl font-bold">{{ props.stations.length }}</div>
-                        <p class="text-xs text-muted-foreground">Radio stations</p>
+                        <p class="text-xs text-muted-foreground">{{ t('dashboard.radio_stations') }}</p>
                     </CardContent>
                 </Card>
 
                 <Card>
                     <CardHeader>
-                        <CardTitle>Total Forms</CardTitle>
-                        <CardDescription>Unique webforms</CardDescription>
+                        <CardTitle>{{ t('dashboard.total_forms') }}</CardTitle>
+                        <CardDescription>{{ t('dashboard.total_forms_desc') }}</CardDescription>
                     </CardHeader>
                     <CardContent>
                         <div class="text-3xl font-bold">
                             {{ props.stations.reduce((sum, station) => sum + station.types.reduce((typeSum, type) => typeSum + type.forms.length, 0), 0) }}
                         </div>
-                        <p class="text-xs text-muted-foreground">Active forms</p>
+                        <p class="text-xs text-muted-foreground">{{ t('dashboard.active_forms') }}</p>
                     </CardContent>
                 </Card>
 
                 <Card>
                     <CardHeader>
-                        <CardTitle>Total Submissions</CardTitle>
-                        <CardDescription>All entries combined</CardDescription>
+                        <CardTitle>{{ t('dashboard.total_submissions') }}</CardTitle>
+                        <CardDescription>{{ t('dashboard.total_submissions_desc') }}</CardDescription>
                     </CardHeader>
                     <CardContent>
                         <div class="text-3xl font-bold">
                             {{ props.stations.reduce((sum, station) => sum + station.totalCount, 0) }}
                         </div>
-                        <p class="text-xs text-muted-foreground">Total entries</p>
+                        <p class="text-xs text-muted-foreground">{{ t('dashboard.total_entries') }}</p>
                     </CardContent>
                 </Card>
             </div>

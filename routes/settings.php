@@ -19,6 +19,9 @@ Route::middleware('auth')->group(function () {
         ->middleware('throttle:6,1')
         ->name('password.update');
 
+    Route::patch('settings/locale', [App\Http\Controllers\Settings\LocaleController::class, 'update'])
+        ->name('locale.update');
+
     Route::get('settings/appearance', function () {
         return Inertia::render('settings/Appearance');
     })->name('appearance.edit');

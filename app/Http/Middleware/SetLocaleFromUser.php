@@ -10,7 +10,8 @@ class SetLocaleFromUser
 {
     public function handle(Request $request, Closure $next): Response
     {
-        app()->setLocale('de');
+        $locale = $request->user()?->locale ?? 'de';
+        app()->setLocale($locale);
 
         return $next($request);
     }

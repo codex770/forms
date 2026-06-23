@@ -11,10 +11,13 @@ import { edit } from '@/routes/profile';
 import type { User } from '@/types';
 import { Link, router } from '@inertiajs/vue3';
 import { LogOut, Settings } from 'lucide-vue-next';
+import { useI18n } from '@/utils/i18n';
 
 interface Props {
     user: User;
 }
+
+const { t } = useI18n();
 
 const handleLogout = () => {
     router.flushAll();
@@ -34,7 +37,7 @@ defineProps<Props>();
         <DropdownMenuItem :as-child="true">
             <Link class="block w-full" :href="edit()" prefetch as="button">
                 <Settings class="mr-2 h-4 w-4" />
-                Settings
+                {{ t('auth.settings') }}
             </Link>
         </DropdownMenuItem>
     </DropdownMenuGroup>
@@ -48,7 +51,7 @@ defineProps<Props>();
             data-test="logout-button"
         >
             <LogOut class="mr-2 h-4 w-4" />
-            Log out
+            {{ t('auth.logout') }}
         </Link>
     </DropdownMenuItem>
 </template>
