@@ -990,11 +990,7 @@ onMounted(async () => {
                                                 class="flex items-center gap-1 text-xs text-gray-500"
                                             >
                                                 <Clock class="h-3 w-3" />
-                                                {{
-                                                    new Date(
-                                                        read.read_at,
-                                                    ).toLocaleString()
-                                                }}
+                                                {{ formatDate(read.read_at) }}
                                             </div>
                                         </div>
                                     </div>
