@@ -1,5 +1,6 @@
-import { computed } from 'vue';
+import { autoTranslate } from '@/utils/autoTranslate';
 import { usePage } from '@inertiajs/vue3';
+import { computed, ref } from 'vue';
 
 type Locale = 'de' | 'en';
 
@@ -20,12 +21,22 @@ const translations: Record<Locale, Record<string, string>> = {
         'forms.duplicates_shown': 'Duplikate: Sichtbar',
         'forms.duplicates_hidden': 'Duplikate: Ausgeblendet',
 
+        // Message details
+        'message.from': 'Nachricht von',
+        'message.data': 'Nachricht',
+        'contact.info': 'Kontaktdaten',
+        'read.status': 'Lesestatus',
+        'reads.read_by': 'Gelesen von {count} {userLabel}:',
+        'reads.user': 'Benutzer',
+        'reads.users': 'Benutzern',
+        'quick.actions': 'Schnellaktionen',
+
         // Column settings
         'columns.title': 'Spalten anzeigen/ausblenden',
         'columns.select_all': 'Alle auswählen',
         'columns.clear_all': 'Alle abwählen',
         'columns.reorder': 'Spaltenreihenfolge ändern (Drag & Drop)',
-        'columns.preference_level': 'Einstellungsebene',
+        'columns.preference_level': 'Präferenzebene (gilt für {form})',
         'columns.form_config': 'Formular-Konfiguration (für alle Benutzer)',
 
         // Filters
@@ -62,7 +73,8 @@ const translations: Record<Locale, Record<string, string>> = {
         'table.date': 'Datum',
         'table.actions': 'Aktionen',
         'table.no_results': 'Keine Einreichungen gefunden',
-        'table.no_results_desc': 'Keine Einreichungen entsprechen den aktuellen Filtern.',
+        'table.no_results_desc':
+            'Keine Einreichungen entsprechen den aktuellen Filtern.',
 
         // Bulk actions
         'bulk.selected': 'ausgewählt',
@@ -74,8 +86,13 @@ const translations: Record<Locale, Record<string, string>> = {
         // Actions
         'action.edit': 'Bearbeiten',
         'action.delete': 'Löschen',
+        'action.delete.message': 'Nachricht löschen',
+        'action.print': 'Drucken',
+        'action.forward_email': 'Per E-Mail weiterleiten',
+        'action.reply_email': 'Per E-Mail antworten',
+        'action.no_email': 'Keine E-Mail verfügbar',
         'action.mark': 'Markieren',
-        'action.unmark': 'Markierung aufheben',
+        'action.unmark': 'Markierung entfernen',
         'action.read': 'Als gelesen markieren',
         'action.unread': 'Als ungelesen markieren',
         'action.save': 'Speichern',
@@ -84,14 +101,16 @@ const translations: Record<Locale, Record<string, string>> = {
 
         // Retention
         'retention.title': 'Automatische Datenlöschung (Aufbewahrung)',
-        'retention.description': 'Legen Sie fest, wie lange Einreichungen für dieses Formular aufbewahrt werden. Nach der angegebenen Anzahl von Tagen löscht der nächtliche Job (läuft täglich um 02:00 Uhr) ältere Datensätze dauerhaft.',
+        'retention.description':
+            'Legen Sie fest, wie lange Einreichungen für dieses Formular aufbewahrt werden. Nach der angegebenen Anzahl von Tagen löscht der nächtliche Job (läuft täglich um 02:00 Uhr) ältere Datensätze dauerhaft.',
         'retention.days_label': 'Aufbewahrungszeitraum (Tage)',
         'retention.days_placeholder': 'z. B. 365 – leer = dauerhaft',
         'retention.save': 'Regel speichern',
         'retention.saving': 'Wird gespeichert…',
         'retention.saved': '✓ Gespeichert',
         'retention.forever': 'Aktuell: dauerhaft aufbewahren',
-        'retention.will_delete': 'Löscht Einreichungen, die älter als {days} Tag(e) sind',
+        'retention.will_delete':
+            'Löscht Einreichungen, die älter als {days} Tag(e) sind',
 
         // Language
         'lang.toggle': 'Sprache',
@@ -107,8 +126,10 @@ const translations: Record<Locale, Record<string, string>> = {
         'common.loading': 'Wird geladen…',
         'common.error': 'Fehler',
         'common.success': 'Erfolgreich',
-        'common.confirm_delete': 'Sind Sie sicher, dass Sie diese Einreichung dauerhaft löschen möchten?',
-        'common.confirm_bulk_delete': 'Sind Sie sicher, dass Sie {count} Einreichung(en) löschen möchten?',
+        'common.confirm_delete':
+            'Sind Sie sicher, dass Sie diese Einreichung dauerhaft löschen möchten?',
+        'common.confirm_bulk_delete':
+            'Sind Sie sicher, dass Sie {count} Einreichung(en) löschen möchten?',
         'common.from': 'Von',
         'common.to': 'Bis',
         'common.min': 'Min',
@@ -120,14 +141,19 @@ const translations: Record<Locale, Record<string, string>> = {
         'common.unknown': 'Unbekannt',
         'common.no_email': 'Keine E-Mail angegeben',
         'common.no_message': 'Kein Nachrichteninhalt',
+        'common.submitted': 'Eingereicht',
+        'common.email': 'E-Mail',
 
         // Dashboard
         'dashboard.title': 'Form Center',
-        'dashboard.subtitle': 'Übersicht aller verfügbaren Formulare und Einreichungen',
+        'dashboard.subtitle':
+            'Übersicht aller verfügbaren Formulare und Einreichungen',
         'dashboard.no_forms': 'Noch keine Formulare',
-        'dashboard.no_forms_desc': 'Formulare erscheinen hier, sobald Einreichungen über Webhooks eingehen.',
+        'dashboard.no_forms_desc':
+            'Formulare erscheinen hier, sobald Einreichungen über Webhooks eingehen.',
         'dashboard.no_forms_station': 'Noch keine Formulare',
-        'dashboard.no_forms_station_desc': 'Formulare erscheinen, sobald Webhooks eingehen.',
+        'dashboard.no_forms_station_desc':
+            'Formulare erscheinen, sobald Webhooks eingehen.',
         'dashboard.forms_count': '{count} Formulare',
         'dashboard.entries_count': '{count} Einträge',
         'dashboard.form_name': 'Formularname',
@@ -165,14 +191,17 @@ const translations: Record<Locale, Record<string, string>> = {
         'export.scope_selected': 'Ausgewählte ({count})',
 
         // Duplicate tooltip
-        'duplicate.tooltip': '{count} doppelte Einreichungen mit gleicher E-Mail/Telefon/Name/PLZ/Geburtsjahr',
+        'duplicate.tooltip':
+            '{count} doppelte Einreichungen mit gleicher E-Mail/Telefon/Name/PLZ/Geburtsjahr',
 
         // Radius warning
-        'filter.radius_warning': 'Mittelpunkt-PLZ konnte nicht aufgelöst werden. Bitte eine gültige PLZ eingeben.',
+        'filter.radius_warning':
+            'Mittelpunkt-PLZ konnte nicht aufgelöst werden. Bitte eine gültige PLZ eingeben.',
 
         // Auth
         'auth.login_title': 'Bei Ihrem Konto anmelden',
-        'auth.login_desc': 'Geben Sie E-Mail und Passwort ein, um sich anzumelden',
+        'auth.login_desc':
+            'Geben Sie E-Mail und Passwort ein, um sich anzumelden',
         'auth.login': 'Anmelden',
         'auth.email': 'E-Mail-Adresse',
         'auth.password': 'Passwort',
@@ -208,12 +237,22 @@ const translations: Record<Locale, Record<string, string>> = {
         'forms.duplicates_shown': 'Duplicates: Shown',
         'forms.duplicates_hidden': 'Duplicates: Hidden',
 
+        // Message details
+        'message.from': 'Message from',
+        'message.data': 'Message',
+        'contact.info': 'Contact Information',
+        'read.status': 'Read Status',
+        'reads.read_by': 'Read by {count} {userLabel}:',
+        'reads.user': 'user',
+        'reads.users': 'users',
+        'quick.actions': 'Quick Actions',
+
         // Column settings
         'columns.title': 'Show/Hide Columns',
         'columns.select_all': 'Select All',
         'columns.clear_all': 'Clear All',
         'columns.reorder': 'Reorder selected columns (drag & drop)',
-        'columns.preference_level': 'Preference level',
+        'columns.preference_level': 'Preference Level (applies to {form})',
         'columns.form_config': 'Form configuration (for all users)',
 
         // Filters
@@ -262,6 +301,11 @@ const translations: Record<Locale, Record<string, string>> = {
         // Actions
         'action.edit': 'Edit',
         'action.delete': 'Delete',
+        'action.delete.message': 'Delete Message',
+        'action.print': 'Print',
+        'action.forward_email': 'Forward via Email',
+        'action.reply_email': 'Reply via Email',
+        'action.no_email': 'No Email Available',
         'action.mark': 'Mark',
         'action.unmark': 'Unmark',
         'action.read': 'Mark as Read',
@@ -272,14 +316,16 @@ const translations: Record<Locale, Record<string, string>> = {
 
         // Retention
         'retention.title': 'Automated Data Deletion (Retention)',
-        'retention.description': 'Configure how long submissions for this form are kept. After the specified number of days the purge job (runs nightly at 02:00) will permanently delete older records.',
+        'retention.description':
+            'Configure how long submissions for this form are kept. After the specified number of days the purge job (runs nightly at 02:00) will permanently delete older records.',
         'retention.days_label': 'Retention period (days)',
         'retention.days_placeholder': 'e.g. 365 – blank = keep forever',
         'retention.save': 'Save Rule',
         'retention.saving': 'Saving…',
         'retention.saved': '✓ Saved',
         'retention.forever': 'Currently: keep forever',
-        'retention.will_delete': 'Will delete submissions older than {days} day(s)',
+        'retention.will_delete':
+            'Will delete submissions older than {days} day(s)',
 
         // Language
         'lang.toggle': 'Language',
@@ -295,8 +341,10 @@ const translations: Record<Locale, Record<string, string>> = {
         'common.loading': 'Loading…',
         'common.error': 'Error',
         'common.success': 'Success',
-        'common.confirm_delete': 'Are you sure you want to permanently delete this submission?',
-        'common.confirm_bulk_delete': 'Are you sure you want to delete {count} submission(s)?',
+        'common.confirm_delete':
+            'Are you sure you want to permanently delete this submission?',
+        'common.confirm_bulk_delete':
+            'Are you sure you want to delete {count} submission(s)?',
         'common.from': 'From',
         'common.to': 'To',
         'common.min': 'Min',
@@ -308,14 +356,19 @@ const translations: Record<Locale, Record<string, string>> = {
         'common.unknown': 'Unknown',
         'common.no_email': 'No email provided',
         'common.no_message': 'No message content',
+        'common.submitted': 'Submitted',
+        'common.email': 'Email',
 
         // Dashboard
         'dashboard.title': 'Form Center',
-        'dashboard.subtitle': 'Overview of all available forms and their submissions',
+        'dashboard.subtitle':
+            'Overview of all available forms and their submissions',
         'dashboard.no_forms': 'No Forms Yet',
-        'dashboard.no_forms_desc': 'Forms will appear here once submissions are received from webhooks.',
+        'dashboard.no_forms_desc':
+            'Forms will appear here once submissions are received from webhooks.',
         'dashboard.no_forms_station': 'No forms yet',
-        'dashboard.no_forms_station_desc': 'Forms will appear when webhooks are received',
+        'dashboard.no_forms_station_desc':
+            'Forms will appear when webhooks are received',
         'dashboard.forms_count': '{count} forms',
         'dashboard.entries_count': '{count} entries',
         'dashboard.form_name': 'Form Name',
@@ -353,10 +406,12 @@ const translations: Record<Locale, Record<string, string>> = {
         'export.scope_selected': 'Selected ({count})',
 
         // Duplicate tooltip
-        'duplicate.tooltip': '{count} duplicate submissions with the same email/phone/name/PLZ/birth year',
+        'duplicate.tooltip':
+            '{count} duplicate submissions with the same email/phone/name/PLZ/birth year',
 
         // Radius warning
-        'filter.radius_warning': 'Center PLZ could not be resolved. Please enter a valid postal code.',
+        'filter.radius_warning':
+            'Center PLZ could not be resolved. Please enter a valid postal code.',
 
         // Auth
         'auth.login_title': 'Log in to your account',
@@ -382,6 +437,71 @@ const translations: Record<Locale, Record<string, string>> = {
     },
 };
 
+function humanizeKey(key: string): string {
+    return key
+        .replace(/[-_]/g, ' ')
+        .replace(/([a-z])([A-Z])/g, '$1 $2')
+        .replace(/\b\w/g, (c) => c.toUpperCase())
+        .trim();
+}
+
+// Reactive cache — lives outside useI18n so it persists across calls
+const autoTranslateCache = ref<Record<string, string>>({});
+
+export const fieldOverrides: Record<Locale, Record<string, string>> = {
+    de: {
+        plz: 'Postleitzahl',
+        zip: 'Postleitzahl',
+        zip_code: 'Postleitzahl',
+        postal_code: 'Postleitzahl',
+        // city: 'Stadt',
+        bday: 'Geburtsdatum',
+        birthday: 'Geburtsdatum',
+        birth_year: 'Geburtsjahr',
+        fname: 'Vorname',
+        lname: 'Nachname',
+        first_name: 'Vorname',
+        last_name: 'Nachname',
+        email_address: 'E-Mail',
+        email: 'E-Mail',
+        gender: 'Geschlecht',
+        sex: 'Geschlecht',
+        datenschutz: 'Datenschutz',
+        message_long: 'Nachricht (lang)',
+        message_short: 'Nachricht (kurz)',
+        newsletter_opt_in: 'Newsletter-Anmeldung',
+        street: 'Straße & Hausnummer',
+        address: 'Straße & Hausnummer',
+        datenschutz_teilnahmebedingungen: 'Datenschutz Teilnahmebedingungen',
+    },
+    en: {
+        plz: 'Postal Code',
+        zip: 'Postal Code',
+        zip_code: 'Postal Code',
+        postal_code: 'Postal Code',
+        // city: 'City',
+        bday: 'Birthday',
+        birthday: 'Birthday',
+        birth_year: 'Birth Year',
+        fname: 'First Name',
+        lname: 'Last Name',
+        first_name: 'First Name',
+        last_name: 'Last Name',
+        email_address: 'Email Address',
+        email: 'Email',
+        gender: 'Gender',
+        sex: 'Sex',
+        datenschutz: 'Data Privacy',
+        message_long: 'Message (long)',
+        message_short: 'Message (short)',
+        newsletter_opt_in: 'Newsletter Opt-In',
+        street: 'Street & House No.',
+        address: 'Address',
+        datenschutz_teilnahmebedingungen:
+            'Privacy Policy and Terms of Participation',
+    },
+};
+
 /**
  * Composable for app-wide translations.
  * Usage: const { t, locale } = useI18n();
@@ -393,16 +513,60 @@ export function useI18n() {
         return l === 'en' ? 'en' : 'de';
     });
 
-    const t = (key: string, vars?: Record<string, string | number>): string => {
+    const t = (
+        key: string,
+        varsOrFallback?: Record<string, string | number> | string,
+        vars?: Record<string, string | number>,
+    ): string => {
         const dict = translations[locale.value] ?? translations['de'];
-        let str = dict[key] ?? key;
-        if (vars) {
-            for (const [k, v] of Object.entries(vars)) {
+        const fallback =
+            typeof varsOrFallback === 'string'
+                ? varsOrFallback
+                : humanizeKey(key.split('.').pop() ?? key);
+        const actualVars =
+            typeof varsOrFallback === 'object' ? varsOrFallback : vars;
+
+        let str = dict[key] ?? fallback;
+        if (actualVars) {
+            for (const [k, v] of Object.entries(actualVars)) {
                 str = str.replace(`{${k}}`, String(v));
             }
         }
         return str;
     };
 
-    return { t, locale };
+    const tField = (fieldKey: string): string => {
+        const overrides = fieldOverrides[locale.value] ?? fieldOverrides['de'];
+
+        // 1. Check manual overrides
+        if (overrides[fieldKey]) {
+            return overrides[fieldKey];
+        }
+
+        // 2. Humanize the key
+        const humanized = humanizeKey(fieldKey);
+
+        // 3. English — humanized is already English
+        if (locale.value === 'en') {
+            return humanized;
+        }
+
+        // 4. Check reactive cache
+        const cacheKey = `${locale.value}:${fieldKey}`;
+        if (autoTranslateCache.value[cacheKey]) {
+            return autoTranslateCache.value[cacheKey];
+        }
+
+        // 5. Fire async translation, return humanized in the meantime
+        autoTranslate(humanized, locale.value).then((translated) => {
+            autoTranslateCache.value = {
+                ...autoTranslateCache.value,
+                [cacheKey]: translated,
+            };
+        });
+
+        return humanized;
+    };
+
+    return { t, tField, locale, humanizeKey, autoTranslateCache };
 }

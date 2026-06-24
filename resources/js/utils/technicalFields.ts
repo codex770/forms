@@ -69,10 +69,11 @@ export function isTechnicalFieldKey(key: string): boolean {
     return TECHNICAL_FIELDS.has(normalizeKey(key));
 }
 
-export function filterOutTechnicalFields<T extends { key: string; label?: string }>(
-    fields: T[],
-): T[] {
+export function filterOutTechnicalFields<
+    T extends { key: string; label?: string },
+>(fields: T[]): T[] {
     return (fields || []).filter(
-        (f) => !isTechnicalFieldKey(f.key) && !isTechnicalFieldKey(f.label || ''),
+        (f) =>
+            !isTechnicalFieldKey(f.key) && !isTechnicalFieldKey(f.label || ''),
     );
 }

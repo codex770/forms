@@ -1,8 +1,8 @@
-import { ref, computed } from 'vue';
-import {
-    resolveAliasedValue,
-    toCanonicalFieldKey,
-} from '@/utils/fieldAliases';
+import { resolveAliasedValue, toCanonicalFieldKey } from '@/utils/fieldAliases';
+import { useI18n } from '@/utils/i18n';
+import { computed, ref } from 'vue';
+
+const { t, tField } = useI18n();
 
 /**
  * Composable for managing field preferences (global form-level config).
@@ -22,6 +22,7 @@ export function useFieldPreferences(
     const inheritedFrom = ref<string | null>(null);
 
     const visibleFieldSet = computed(() => new Set(visibleFieldOrder.value));
+    const { t } = useI18n();
 
     const normalizeOrderedKeys = (keys: string[]) => {
         const out: string[] = [];
@@ -63,7 +64,11 @@ export function useFieldPreferences(
             const response = await fetch(`/forms/${webformId}/column-config`);
             const data = await response.json();
 
-            if (data.success && Array.isArray(data.visible_columns) && data.visible_columns.length > 0) {
+            if (
+                data.success &&
+                Array.isArray(data.visible_columns) &&
+                data.visible_columns.length > 0
+            ) {
                 const savedFields = normalizeOrderedKeys(data.visible_columns);
                 const maxReasonable = Math.max(smartDefaults.length * 2, 10);
                 if (savedFields.length <= maxReasonable) {
@@ -91,20 +96,23 @@ export function useFieldPreferences(
             sortConfig?: { column: string; direction: 'asc' | 'desc' };
             savedFilters?: Record<string, any>;
             useFormLevel?: boolean;
-        } = {}
+        } = {},
     ) => {
         saving.value = true;
         try {
             if (!webformId) return false;
 
             const ordered = normalizeOrderedKeys(fields);
-            const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+            const csrfToken =
+                document
+                    .querySelector('meta[name="csrf-token"]')
+                    ?.getAttribute('content') || '';
 
             const response = await fetch(`/forms/${webformId}/column-config`, {
                 method: 'PUT',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Accept': 'application/json',
+                    Accept: 'application/json',
                     'X-CSRF-TOKEN': csrfToken,
                     'X-Requested-With': 'XMLHttpRequest',
                 },
@@ -129,7 +137,10 @@ export function useFieldPreferences(
     /**
      * Get field value from JSON data
      */
-    const getFieldValue = (data: Record<string, any>, fieldName: string): any => {
+    const getFieldValue = (
+        data: Record<string, any>,
+        fieldName: string,
+    ): any => {
         // Handle nested paths like 'address.city'
         if (fieldName.includes('.')) {
             const parts = fieldName.split('.');
@@ -151,44 +162,7 @@ export function useFieldPreferences(
      * Get human-readable label for a field (German).
      */
     const getFieldLabel = (fieldName: string): string => {
-        const canonical = toCanonicalFieldKey(fieldName);
-        // Labels from client form field reference (TITLE column)
-        const labels: Record<string, string> = {
-            'station': 'Station',
-            'gender': 'Anrede',
-            'sex': 'Anrede',
-            'first_name': 'Vorname',
-            'last_name': 'Nachname',
-            'name': 'Name',
-            'address': 'Straße & Hausnummer',
-            'street': 'Straße & Hausnummer',
-            'zip': 'Postleitzahl',
-            'zip_code': 'Postleitzahl',
-            'postal_code': 'Postleitzahl',
-            'plz': 'Postleitzahl',
-            'city': 'Stadt',
-            'phone': 'Telefon',
-            'email': 'E-Mail',
-            'email_address': 'E-Mail',
-            'birthday': 'Geburtsdatum',
-            'birth_year': 'Geburtsjahr',
-            'message_long': 'Nachricht (lang)',
-            'message_short': 'Nachricht (kurz)',
-            'message': 'Nachricht',
-            'description': 'Beschreibung',
-            'age': 'Alter',
-        };
-
-        if (labels[canonical]) {
-            return labels[canonical];
-        }
-
-        return canonical
-            .replace(/[_-]/g, ' ')
-            .replace(/([a-z])([A-Z])/g, '$1 $2')
-            .split(' ')
-            .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-            .join(' ');
+        return tField(fieldName);
     };
 
     /**
@@ -246,4 +220,3 @@ export function useFieldPreferences(
         moveField,
     };
 }
-

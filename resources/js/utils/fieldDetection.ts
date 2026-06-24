@@ -1,3 +1,4 @@
+import { useI18n } from '@/utils/i18n';
 import { isTechnicalFieldKey } from './technicalFields';
 
 /**
@@ -17,27 +18,26 @@ export function detectFieldType(value: any): FieldInfo['type'] {
     if (value === null || value === undefined) {
         return 'string';
     }
-    
+
     if (typeof value === 'string') {
-        // Check if it's a date
         if (value.match(/^\d{4}-\d{2}-\d{2}/) || !isNaN(Date.parse(value))) {
             return 'date';
         }
         return 'string';
     }
-    
+
     if (typeof value === 'number') {
         return Number.isInteger(value) ? 'integer' : 'float';
     }
-    
+
     if (typeof value === 'boolean') {
         return 'boolean';
     }
-    
+
     if (typeof value === 'object') {
         return 'object';
     }
-    
+
     return 'string';
 }
 
@@ -48,8 +48,11 @@ export function formatFieldValue(value: any, type?: FieldInfo['type']): string {
     if (value === null || value === undefined) {
         return 'N/A';
     }
-    
-    if (type === 'date' || (typeof value === 'string' && value.match(/^\d{4}-\d{2}-\d{2}/))) {
+
+    if (
+        type === 'date' ||
+        (typeof value === 'string' && value.match(/^\d{4}-\d{2}-\d{2}/))
+    ) {
         try {
             const date = new Date(value);
             return date.toLocaleDateString();
@@ -57,15 +60,15 @@ export function formatFieldValue(value: any, type?: FieldInfo['type']): string {
             return String(value);
         }
     }
-    
+
     if (type === 'object') {
         return JSON.stringify(value, null, 2);
     }
-    
+
     if (type === 'boolean') {
         return value ? 'Yes' : 'No';
     }
-    
+
     return String(value);
 }
 
@@ -73,38 +76,76 @@ export function formatFieldValue(value: any, type?: FieldInfo['type']): string {
  * Group fields by category for better organization
  * Uses exact matching to prevent duplicates
  */
-export function groupFieldsByCategory(fields: FieldInfo[]): Record<string, FieldInfo[]> {
+export function groupFieldsByCategory(
+    fields: FieldInfo[],
+): Record<string, FieldInfo[]> {
     const groups: Record<string, FieldInfo[]> = {
         'Contact Information': [],
         'Message Content': [],
-        'Location': [],
+        Location: [],
         'Personal Details': [],
-        'Other': [],
+        Other: [],
     };
-    
-    // Use exact key matching first, then fallback to includes for variations
-    const contactFields = ['fname', 'lname', 'first_name', 'last_name', 'name', 'email', 'email_address', 'phone', 'phone_number', 'tel'];
-    const messageFields = ['message', 'message_long', 'message_short', 'description', 'content', 'text', 'comment'];
-    const locationFields = ['city', 'zip', 'zip_code', 'postal_code', 'plz', 'place', 'location', 'address', 'street'];
-    const personalFields = ['age', 'birth_year', 'birthday', 'bday', 'gender', 'sex', 'dob'];
-    
-    // Track which fields have been categorized to prevent duplicates
+
+    const contactFields = [
+        'fname',
+        'lname',
+        'first_name',
+        'last_name',
+        'name',
+        'email',
+        'email_address',
+        'phone',
+        'phone_number',
+        'tel',
+    ];
+    const messageFields = [
+        'message',
+        'message_long',
+        'message_short',
+        'description',
+        'content',
+        'text',
+        'comment',
+    ];
+    const locationFields = [
+        'city',
+        'zip',
+        'zip_code',
+        'postal_code',
+        'plz',
+        'place',
+        'location',
+        'address',
+        'street',
+    ];
+    const personalFields = [
+        'age',
+        'birth_year',
+        'birthday',
+        'bday',
+        'gender',
+        'sex',
+        'dob',
+    ];
+
     const categorized = new Set<string>();
-    
-    fields.forEach(field => {
-        if (isTechnicalFieldKey(field.key) || isTechnicalFieldKey(field.label)) {
+
+    fields.forEach((field) => {
+        if (
+            isTechnicalFieldKey(field.key) ||
+            isTechnicalFieldKey(field.label)
+        ) {
             return;
         }
 
-        // Skip if already categorized
         if (categorized.has(field.key)) {
             return;
         }
-        
+
         const key = field.key.toLowerCase();
         let categorized_flag = false;
-        
-        // Exact match first (most specific)
+
         if (contactFields.includes(key)) {
             groups['Contact Information'].push(field);
             categorized_flag = true;
@@ -118,18 +159,44 @@ export function groupFieldsByCategory(fields: FieldInfo[]): Record<string, Field
             groups['Personal Details'].push(field);
             categorized_flag = true;
         } else {
-            // Fallback: check if key contains any of the field names (but be more specific)
-            // Only match if the key starts with or is exactly the field name
-            if (contactFields.some(f => key === f || key.startsWith(f + '_') || key.endsWith('_' + f))) {
+            if (
+                contactFields.some(
+                    (f) =>
+                        key === f ||
+                        key.startsWith(f + '_') ||
+                        key.endsWith('_' + f),
+                )
+            ) {
                 groups['Contact Information'].push(field);
                 categorized_flag = true;
-            } else if (messageFields.some(f => key === f || key.startsWith(f + '_') || key.endsWith('_' + f))) {
+            } else if (
+                messageFields.some(
+                    (f) =>
+                        key === f ||
+                        key.startsWith(f + '_') ||
+                        key.endsWith('_' + f),
+                )
+            ) {
                 groups['Message Content'].push(field);
                 categorized_flag = true;
-            } else if (locationFields.some(f => key === f || key.startsWith(f + '_') || key.endsWith('_' + f))) {
+            } else if (
+                locationFields.some(
+                    (f) =>
+                        key === f ||
+                        key.startsWith(f + '_') ||
+                        key.endsWith('_' + f),
+                )
+            ) {
                 groups['Location'].push(field);
                 categorized_flag = true;
-            } else if (personalFields.some(f => key === f || key.startsWith(f + '_') || key.endsWith('_' + f))) {
+            } else if (
+                personalFields.some(
+                    (f) =>
+                        key === f ||
+                        key.startsWith(f + '_') ||
+                        key.endsWith('_' + f),
+                )
+            ) {
                 groups['Personal Details'].push(field);
                 categorized_flag = true;
             } else {
@@ -137,67 +204,26 @@ export function groupFieldsByCategory(fields: FieldInfo[]): Record<string, Field
                 categorized_flag = true;
             }
         }
-        
+
         if (categorized_flag) {
             categorized.add(field.key);
         }
     });
-    
-    // Remove empty groups
-    Object.keys(groups).forEach(key => {
+
+    Object.keys(groups).forEach((key) => {
         if (groups[key].length === 0) {
             delete groups[key];
         }
     });
-    
+
     return groups;
 }
 
 /**
- * Get human-readable label for a field key (German).
+ * Get human-readable label for a field key.
+ * Uses tField from useI18n: checks fieldOverrides first, then auto-humanizes.
  */
 export function getFieldLabel(key: string): string {
-    // Labels from client form field reference (TITLE column)
-    const labels: Record<string, string> = {
-        'station': 'Station',
-        'gender': 'Anrede',
-        'sex': 'Anrede',
-        'fname': 'Vorname',
-        'first_name': 'Vorname',
-        'vorname': 'Vorname',
-        'lname': 'Nachname',
-        'last_name': 'Nachname',
-        'nachname': 'Nachname',
-        'name': 'Name',
-        'address': 'Straße & Hausnummer',
-        'street': 'Straße & Hausnummer',
-        'zip': 'Postleitzahl',
-        'zip_code': 'Postleitzahl',
-        'postal_code': 'Postleitzahl',
-        'plz': 'Postleitzahl',
-        'city': 'Stadt',
-        'phone': 'Telefon',
-        'email': 'E-Mail',
-        'email_address': 'E-Mail',
-        'birthday': 'Geburtsdatum',
-        'bday': 'Geburtsdatum',
-        'birth_year': 'Geburtsjahr',
-        'message_long': 'Nachricht (lang)',
-        'message_short': 'Nachricht (kurz)',
-        'message': 'Nachricht',
-        'description': 'Beschreibung',
-        'age': 'Alter',
-    };
-
-    const k = key.toLowerCase();
-    if (labels[k]) {
-        return labels[k];
-    }
-
-    return key
-        .replace(/[_-]/g, ' ')
-        .replace(/([a-z])([A-Z])/g, '$1 $2')
-        .split(' ')
-        .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-        .join(' ');
+    const { tField } = useI18n();
+    return tField(key);
 }

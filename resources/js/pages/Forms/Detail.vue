@@ -14,6 +14,13 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from '@/components/ui/select';
+import {
     Table,
     TableBody,
     TableCell,
@@ -31,6 +38,7 @@ import {
 } from '@/routes/contact';
 import { dashboard as userDashboard } from '@/routes/user';
 import { type BreadcrumbItem } from '@/types';
+import { autoTranslate } from '@/utils/autoTranslate';
 import {
     dedupeFieldsByCanonicalKey,
     toCanonicalFieldKey,
@@ -39,7 +47,7 @@ import {
     formatFieldValue,
     groupFieldsByCategory,
 } from '@/utils/fieldDetection';
-import { useI18n } from '@/utils/i18n';
+import { fieldOverrides, useI18n } from '@/utils/i18n';
 import { filterOutTechnicalFields } from '@/utils/technicalFields';
 import { Head, Link, router, usePage } from '@inertiajs/vue3';
 import {
@@ -55,9 +63,9 @@ import {
     FileSpreadsheet,
     FileText,
     Filter,
+    GripVertical,
     Save,
     Search,
-    GripVertical,
     Star,
     Trash2,
     X,
@@ -141,7 +149,7 @@ interface Props {
 
 const props = defineProps<Props>();
 
-const { t } = useI18n();
+const { t, tField, locale, humanizeKey, autoTranslateCache } = useI18n();
 
 // New fields from backend
 const newFields = computed(() => props.newFields || []);
@@ -599,7 +607,7 @@ const printTable = () => {
     const cols = visibleFieldList.value;
     const rows = submissionRows.value;
 
-    const ths = ['ID', ...cols.map((c) => c.label), 'Date']
+    const ths = ['ID', ...cols.map((c)  => tField(c.key)), 'Date']
         .map((h) => `<th>${h}</th>`)
         .join('');
     const trs = rows
@@ -659,7 +667,11 @@ const toggleRead = async (submission: ContactSubmission) => {
         }
     } catch (error) {
         console.error('Error toggling read status:', error);
-        alert(t('common.error') + ': ' + (error instanceof Error ? error.message : String(error)));
+        alert(
+            t('common.error') +
+                ': ' +
+                (error instanceof Error ? error.message : String(error)),
+        );
     }
 };
 
@@ -691,7 +703,11 @@ const toggleMark = async (submission: ContactSubmission) => {
         }
     } catch (error) {
         console.error('Error toggling mark:', error);
-        alert(t('common.error') + ': ' + (error instanceof Error ? error.message : String(error)));
+        alert(
+            t('common.error') +
+                ': ' +
+                (error instanceof Error ? error.message : String(error)),
+        );
     }
 };
 
@@ -799,6 +815,29 @@ onMounted(async () => {
             allAvailableFields.value.slice(0, 4).map((f: FieldInfo) => f.key);
         setAllFields(defaults, true);
         await saveColumnPreferences();
+    }
+
+    // Preload translations for unknown fields (non-English locale only)
+    if (locale.value !== 'en' && allAvailableFields.value.length > 0) {
+        const overrides = fieldOverrides[locale.value] ?? fieldOverrides['de'];
+        const unknownFields = allAvailableFields.value
+            .filter((f) => !overrides[f.key])
+            .map((f) => ({ key: f.key, humanized: humanizeKey(f.key) }));
+
+        if (unknownFields.length > 0) {
+            await Promise.all(
+                unknownFields.map(({ key, humanized }) =>
+                    autoTranslate(humanized, locale.value).then(
+                        (translated) => {
+                            autoTranslateCache.value = {
+                                ...autoTranslateCache.value,
+                                [`${locale.value}:${key}`]: translated,
+                            };
+                        },
+                    ),
+                ),
+            );
+        }
     }
 });
 </script>
@@ -935,9 +974,9 @@ onMounted(async () => {
                                 @dragstart="onDragStart(field.key)"
                                 @dragover.prevent
                                 @drop.prevent="onDropOn(field.key)"
-                                :title="field.label"
+                                :title="tField(field.key)"
                             >
-                                {{ field.label }}
+                                {{ tField(field.key) }}
                             </div>
                         </div>
                     </div>
@@ -961,7 +1000,7 @@ onMounted(async () => {
                                 class="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
                             />
                             <span class="text-sm font-medium select-none">{{
-                                field.label
+                                tField(field.key)
                             }}</span>
                             <Badge
                                 v-if="isNewField(field.key)"
@@ -1036,9 +1075,11 @@ onMounted(async () => {
                     <!-- Basic Filters -->
                     <div class="mb-4 grid grid-cols-1 gap-4 md:grid-cols-3">
                         <div class="space-y-2">
-                            <label class="text-sm font-medium">{{
-                                t('filter.search')
-                            }}</label>
+                            <label
+                                class="flex h-5 items-center text-sm font-medium"
+                            >
+                                {{ t('filter.search') }}</label
+                            >
                             <Input
                                 v-model="searchQuery"
                                 :placeholder="t('filter.search_placeholder')"
@@ -1046,32 +1087,46 @@ onMounted(async () => {
                             />
                         </div>
                         <div class="space-y-2">
-                            <label class="flex items-center gap-1.5 text-sm font-medium">
-                                <Star class="h-3.5 w-3.5 text-yellow-500" />
+                            <label
+                                class="flex h-5 items-center gap-1.5 text-sm font-medium"
+                            >
+                                <Star
+                                    class="h-3.5 w-3.5 shrink-0 text-yellow-500"
+                                />
                                 {{ t('filter.status') }}
                             </label>
-                            <select
-                                v-model="selectedStatus"
-                                class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                            >
-                                <option value="all">
-                                    {{ t('filter.status_all') }}
-                                </option>
-                                <option value="unread">
-                                    {{ t('filter.status_unread') }}
-                                </option>
-                                <option value="read">
-                                    {{ t('filter.status_read') }}
-                                </option>
-                                <option value="starred">
-                                    {{ t('filter.status_starred') }}
-                                </option>
-                            </select>
+
+                            <Select v-model="selectedStatus">
+                                <SelectTrigger class="h-9 w-full">
+                                    <SelectValue
+                                        :placeholder="t('filter.status_all')"
+                                    />
+                                </SelectTrigger>
+
+                                <SelectContent class="w-127">
+                                    <SelectItem value="all">
+                                        {{ t('filter.status_all') }}
+                                    </SelectItem>
+
+                                    <SelectItem value="unread">
+                                        {{ t('filter.status_unread') }}
+                                    </SelectItem>
+
+                                    <SelectItem value="read">
+                                        {{ t('filter.status_read') }}
+                                    </SelectItem>
+
+                                    <SelectItem value="starred">
+                                        {{ t('filter.status_starred') }}
+                                    </SelectItem>
+                                </SelectContent>
+                            </Select>
                         </div>
                         <div class="space-y-2">
-                            <label class="text-sm font-medium">{{
-                                t('filter.date_range')
-                            }}</label>
+                            <label
+                                class="flex h-5 items-center text-sm font-medium"
+                                >{{ t('filter.date_range') }}</label
+                            >
                             <div class="flex gap-2">
                                 <Input
                                     v-model="dateFrom"
@@ -1156,9 +1211,10 @@ onMounted(async () => {
 
                             <!-- PLZ Range -->
                             <div class="space-y-2">
-                                <label class="text-sm font-medium">{{
-                                    t('filter.plz_from')
-                                }} – {{ t('filter.plz_to') }}</label>
+                                <label class="text-sm font-medium"
+                                    >{{ t('filter.plz_from') }} –
+                                    {{ t('filter.plz_to') }}</label
+                                >
                                 <div class="flex gap-2">
                                     <Input
                                         v-model="plzFrom"
@@ -1191,12 +1247,20 @@ onMounted(async () => {
                                 }}</label>
                                 <select
                                     v-model="gender"
-                                    class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                                    class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
                                 >
-                                    <option value="">{{ t('filter.gender_all') }}</option>
-                                    <option value="m">{{ t('filter.gender_m') }}</option>
-                                    <option value="f">{{ t('filter.gender_f') }}</option>
-                                    <option value="d">{{ t('filter.gender_d') }}</option>
+                                    <option value="">
+                                        {{ t('filter.gender_all') }}
+                                    </option>
+                                    <option value="m">
+                                        {{ t('filter.gender_m') }}
+                                    </option>
+                                    <option value="f">
+                                        {{ t('filter.gender_f') }}
+                                    </option>
+                                    <option value="d">
+                                        {{ t('filter.gender_d') }}
+                                    </option>
                                 </select>
                             </div>
 
@@ -1274,9 +1338,7 @@ onMounted(async () => {
             <Card>
                 <CardContent class="p-0">
                     <div
-                        v-if="
-                            !submissionRows.length
-                        "
+                        v-if="!submissionRows.length"
                         class="py-12 text-center"
                     >
                         <FileText class="mx-auto h-12 w-12 text-gray-400" />
@@ -1325,11 +1387,13 @@ onMounted(async () => {
                                     @dragover.prevent
                                     @drop.prevent="onDropOn(field.key)"
                                 >
-                                    <span class="inline-flex items-center gap-1">
+                                    <span
+                                        class="inline-flex items-center gap-1"
+                                    >
                                         <GripVertical
                                             class="h-3 w-3 shrink-0 text-muted-foreground"
                                         />
-                                        {{ field.label }}
+                                        {{ tField(field.key) }}
                                     </span>
                                 </TableHead>
                                 <TableHead
@@ -1478,7 +1542,7 @@ onMounted(async () => {
                                         <Input
                                             v-model="editingData[field.key]"
                                             class="h-8"
-                                            :placeholder="field.label"
+                                            :placeholder="tField(field.key)"
                                         />
                                     </div>
                                     <div v-else class="text-sm">
@@ -1748,7 +1812,11 @@ onMounted(async () => {
                     <DialogTitle>{{ t('export.title') }}</DialogTitle>
                     <DialogDescription>
                         <span v-if="exportScope === 'selected'">
-                            {{ t('export.scope_selected', { count: selectedRows.size }) }}
+                            {{
+                                t('export.scope_selected', {
+                                    count: selectedRows.size,
+                                })
+                            }}
                         </span>
                         <span v-else>
                             {{ t('export.scope_current') }}
@@ -1767,7 +1835,9 @@ onMounted(async () => {
                 </div>
                 <DialogFooter class="mt-4">
                     <DialogClose as-child>
-                        <Button variant="ghost">{{ t('action.cancel') }}</Button>
+                        <Button variant="ghost">{{
+                            t('action.cancel')
+                        }}</Button>
                     </DialogClose>
                 </DialogFooter>
             </DialogContent>

@@ -18,15 +18,20 @@ import {
     index as contactIndex,
     toggleRead as contactToggleRead,
 } from '@/routes/contact';
+import { autoTranslate } from '@/utils/autoTranslate';
+import {
+    dedupeFieldsByCanonicalKey,
+    resolveAliasedValue,
+} from '@/utils/fieldAliases';
 import {
     formatFieldValue,
     groupFieldsByCategory,
 } from '@/utils/fieldDetection';
+import { fieldOverrides, useI18n } from '@/utils/i18n';
 import {
     filterOutTechnicalFields,
     isTechnicalFieldKey,
 } from '@/utils/technicalFields';
-import { dedupeFieldsByCanonicalKey, resolveAliasedValue } from '@/utils/fieldAliases';
 import { Head, Link, router, usePage } from '@inertiajs/vue3';
 import {
     AlertCircle,
@@ -39,6 +44,7 @@ import {
     EyeOff,
     Mail,
     MessageSquare,
+    PrinterCheck,
     Star,
     Trash2,
 } from 'lucide-vue-next';
@@ -93,6 +99,8 @@ const newFields = computed(() => props.newFields || []);
 
 const authUser = computed(() => usePage().props.auth.user);
 
+const { t, tField, locale, humanizeKey, autoTranslateCache } = useI18n();
+
 // Get query parameters to determine where to go back
 const urlParams = new URLSearchParams(window.location.search);
 const fromPage = urlParams.get('from');
@@ -115,7 +123,9 @@ const backButtonText = computed(() => {
 
 // Reactive reads list (so toggles can update UI without a full page reload)
 const reads = ref(props.submission.reads_with_users || []);
-const marked = ref(Boolean(props.submission.marks && props.submission.marks.length > 0));
+const marked = ref(
+    Boolean(props.submission.marks && props.submission.marks.length > 0),
+);
 
 // Check if current user has read the submission
 const isReadByCurrentUser = computed((): boolean => {
@@ -155,6 +165,12 @@ const getDisplayName = (data: any): string => {
         data?.contact_name ||
         data?.email ||
         'Unknown'
+    );
+};
+
+const formatDate = (date: string) => {
+    return new Date(date).toLocaleString(
+        locale.value === 'de' ? 'de-DE' : 'en-US',
     );
 };
 
@@ -217,7 +233,9 @@ const toggleRead = async () => {
 
 const toggleMark = async () => {
     try {
-        const data = await postJson(`/contact-messages/${props.submission.id}/toggle-mark`);
+        const data = await postJson(
+            `/contact-messages/${props.submission.id}/toggle-mark`,
+        );
         marked.value = data?.marked === true;
     } catch (error) {
         console.error('Error toggling mark:', error);
@@ -226,9 +244,11 @@ const toggleMark = async () => {
 };
 
 const printSubmission = () => {
-    const rows = visibleDataFields.value.map(([key, value]) => {
-        return `<tr><th>${getFieldLabel(key)}</th><td>${String(value ?? '')}</td></tr>`;
-    }).join('');
+    const rows = visibleDataFields.value
+        .map(([key, value]) => {
+            return `<tr><th>${tField(key)}</th><td>${String(value ?? '')}</td></tr>`;
+        })
+        .join('');
 
     const w = window.open('', '_blank');
     if (!w) return;
@@ -258,13 +278,17 @@ const printSubmission = () => {
 };
 
 const forwardEmailHref = computed(() => {
-    const subject = encodeURIComponent(`Forward: Submission #${props.submission.id}`);
+    const subject = encodeURIComponent(
+        `Forward: Submission #${props.submission.id}`,
+    );
     const lines: string[] = [];
     lines.push(`Submission #${props.submission.id}`);
-    lines.push(`Submitted: ${new Date(props.submission.created_at).toLocaleString()}`);
+    lines.push(
+        `Submitted: ${new Date(props.submission.created_at).toLocaleString()}`,
+    );
     lines.push('');
     visibleDataFields.value.forEach(([key, value]) => {
-        lines.push(`${getFieldLabel(key)}: ${String(value ?? '')}`);
+        lines.push(`${tField(key)}: ${String(value ?? '')}`);
     });
     const body = encodeURIComponent(lines.join('\n'));
     return `mailto:?subject=${subject}&body=${body}`;
@@ -379,8 +403,14 @@ const visibleDataFields = computed(() => {
 
     return visibleFieldOrder.value
         .filter((key) => !isTechnicalFieldKey(key))
-        .map((key) => [key, resolveAliasedValue(props.submission.data, key)] as const)
-        .filter(([, value]) => value !== null && value !== undefined && value !== '');
+        .map(
+            (key) =>
+                [key, resolveAliasedValue(props.submission.data, key)] as const,
+        )
+        .filter(
+            ([, value]) =>
+                value !== null && value !== undefined && value !== '',
+        );
 });
 
 // Get all data fields
@@ -425,8 +455,31 @@ const saveLayoutPreferences = async (): Promise<boolean> => {
     }
 };
 
-onMounted(() => {
-    loadPreferences();
+onMounted(async () => {
+    await loadPreferences();
+
+    // Preload translations for unknown fields
+    if (locale.value !== 'en' && allAvailableFields.value.length > 0) {
+        const overrides = fieldOverrides[locale.value] ?? fieldOverrides['de'];
+        const unknownFields = allAvailableFields.value
+            .filter((f) => !overrides[f.key])
+            .map((f) => ({ key: f.key, humanized: humanizeKey(f.key) }));
+
+        if (unknownFields.length > 0) {
+            await Promise.all(
+                unknownFields.map(({ key, humanized }) =>
+                    autoTranslate(humanized, locale.value).then(
+                        (translated) => {
+                            autoTranslateCache.value = {
+                                ...autoTranslateCache.value,
+                                [`${locale.value}:${key}`]: translated,
+                            };
+                        },
+                    ),
+                ),
+            );
+        }
+    }
 });
 </script>
 
@@ -484,16 +537,20 @@ onMounted(() => {
                             </div>
 
                             <h1 class="text-3xl font-bold text-gray-900">
-                                Message from
+                                {{ t('message.from') }}
                                 {{ getDisplayName(submission.data) }}
                             </h1>
-                            <p class="mt-2 text-gray-600">
+                            <!-- <p class="mt-2 text-gray-600">
                                 Submitted
                                 {{
                                     new Date(
                                         submission.created_at,
                                     ).toLocaleString()
                                 }}
+                            </p> -->
+                            <p class="mt-2 text-gray-600">
+                                {{ t('common.submitted') }}
+                                {{ formatDate(submission.created_at) }}
                             </p>
                         </div>
 
@@ -514,10 +571,11 @@ onMounted(() => {
                                     class="mr-2 h-4 w-4"
                                 />
                                 <Eye v-else class="mr-2 h-4 w-4" />
+
                                 {{
                                     isReadByCurrentUser
-                                        ? 'Mark Unread'
-                                        : 'Mark Read'
+                                        ? t('action.unread')
+                                        : t('action.read')
                                 }}
                             </Button>
 
@@ -527,7 +585,7 @@ onMounted(() => {
                                 variant="destructive"
                             >
                                 <Trash2 class="mr-2 h-4 w-4" />
-                                Delete
+                                {{ t('action.delete') }}
                             </Button>
                         </div>
                     </div>
@@ -539,7 +597,7 @@ onMounted(() => {
                         <div class="flex items-center justify-between">
                             <CardTitle class="flex items-center gap-2">
                                 <Columns class="h-5 w-5" />
-                                Show/Hide Fields
+                                {{ t('columns.title') }}
                                 <Badge
                                     v-if="newFields && newFields.length > 0"
                                     variant="secondary"
@@ -565,7 +623,7 @@ onMounted(() => {
                                     "
                                     class="h-8 text-xs"
                                 >
-                                    Select All
+                                    {{ t('columns.select_all') }}
                                 </Button>
                                 <Button
                                     variant="ghost"
@@ -578,7 +636,7 @@ onMounted(() => {
                                     "
                                     class="h-8 text-xs"
                                 >
-                                    Clear All
+                                    {{ t('columns.clear_all') }}
                                 </Button>
                             </div>
                         </div>
@@ -628,7 +686,7 @@ onMounted(() => {
                                     class="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
                                 />
                                 <span class="text-sm font-medium select-none">{{
-                                    field.label
+                                    tField(field.key)
                                 }}</span>
                                 <Badge
                                     v-if="isNewField(field.key)"
@@ -655,10 +713,13 @@ onMounted(() => {
                                 >
                             </div>
                             <div class="mt-1">
-                                Preference level: <strong>Type</strong> (applies
-                                to all
-                                {{ submission.submission_form || 'forms' }}
-                                forms)
+                                {{
+                                    t('columns.preference_level', {
+                                        form:
+                                            submission.submission_form ||
+                                            'forms',
+                                    })
+                                }}
                             </div>
                         </div>
                     </CardContent>
@@ -672,7 +733,7 @@ onMounted(() => {
                             <CardHeader>
                                 <CardTitle class="flex items-center gap-2">
                                     <MessageSquare class="h-5 w-5" />
-                                    Message
+                                    {{ t('message.data') }}
                                 </CardTitle>
                             </CardHeader>
                             <CardContent>
@@ -726,7 +787,7 @@ onMounted(() => {
                                         class="flex items-start justify-between border-b border-gray-100 py-2 last:border-b-0"
                                     >
                                         <div class="font-medium text-gray-700">
-                                            {{ getFieldLabel(key) }}:
+                                            {{ tField(key) }}:
                                         </div>
                                         <div
                                             class="max-w-xs text-right break-words text-gray-900"
@@ -792,7 +853,9 @@ onMounted(() => {
                         <!-- Contact Information -->
                         <Card>
                             <CardHeader>
-                                <CardTitle>Contact Information</CardTitle>
+                                <CardTitle>
+                                    {{ t('contact.info') }}
+                                </CardTitle>
                             </CardHeader>
                             <CardContent class="space-y-4">
                                 <!-- Avatar and Name -->
@@ -827,7 +890,7 @@ onMounted(() => {
                                     <Mail class="h-4 w-4 text-gray-400" />
                                     <div class="flex-1">
                                         <div class="text-sm text-gray-500">
-                                            Email
+                                            {{ t('common.email') }}
                                         </div>
                                         <a
                                             :href="`mailto:${getDisplayEmail(submission.data)}`"
@@ -846,7 +909,7 @@ onMounted(() => {
                                     <Mail class="h-4 w-4" />
                                     <div class="flex-1">
                                         <div class="text-sm">
-                                            No email provided
+                                            {{ t('common.no_email') }}
                                         </div>
                                     </div>
                                 </div>
@@ -856,13 +919,13 @@ onMounted(() => {
                                     <Calendar class="h-4 w-4 text-gray-400" />
                                     <div class="flex-1">
                                         <div class="text-sm text-gray-500">
-                                            Submitted
+                                            {{ t('common.submitted') }}
                                         </div>
                                         <div class="text-sm text-gray-900">
                                             {{
-                                                new Date(
+                                                formatDate(
                                                     submission.created_at,
-                                                ).toLocaleString()
+                                                )
                                             }}
                                         </div>
                                     </div>
@@ -875,7 +938,7 @@ onMounted(() => {
                             <CardHeader>
                                 <CardTitle class="flex items-center gap-2">
                                     <Eye class="h-5 w-5" />
-                                    Read Status
+                                    {{ t('read.status') }}
                                 </CardTitle>
                             </CardHeader>
                             <CardContent>
@@ -893,12 +956,16 @@ onMounted(() => {
 
                                 <div v-else class="space-y-3">
                                     <div class="mb-3 text-sm text-gray-500">
-                                        Read by {{ reads.length }}
                                         {{
-                                            reads.length === 1
-                                                ? 'user'
-                                                : 'users'
-                                        }}:
+                                            t('reads.read_by', {
+                                                count: reads.length,
+                                                userLabel: t(
+                                                    reads.length === 1
+                                                        ? 'reads.user'
+                                                        : 'reads.users',
+                                                ),
+                                            })
+                                        }}
                                     </div>
 
                                     <div
@@ -938,7 +1005,7 @@ onMounted(() => {
                         <!-- Quick Actions -->
                         <Card>
                             <CardHeader>
-                                <CardTitle>Quick Actions</CardTitle>
+                                <CardTitle>{{ t('quick.actions') }}</CardTitle>
                             </CardHeader>
                             <CardContent class="space-y-2">
                                 <!-- Reply via Email -->
@@ -953,7 +1020,7 @@ onMounted(() => {
                                         class="w-full justify-start"
                                     >
                                         <Mail class="mr-2 h-4 w-4" />
-                                        Reply via Email
+                                        {{ t('action.reply_email') }}
                                     </Button>
                                 </a>
                                 <Button
@@ -964,7 +1031,7 @@ onMounted(() => {
                                     disabled
                                 >
                                     <Mail class="mr-2 h-4 w-4" />
-                                    No Email Available
+                                    {{ t('action.no_email') }}
                                 </Button>
 
                                 <!-- Toggle Read Status -->
@@ -984,10 +1051,11 @@ onMounted(() => {
                                         class="mr-2 h-4 w-4"
                                     />
                                     <Eye v-else class="mr-2 h-4 w-4" />
+
                                     {{
                                         isReadByCurrentUser
-                                            ? 'Mark Unread'
-                                            : 'Mark Read'
+                                            ? t('action.unread')
+                                            : t('action.read')
                                     }}
                                 </Button>
 
@@ -1002,14 +1070,14 @@ onMounted(() => {
                                         class="mr-2 h-4 w-4"
                                         :class="
                                             isMarkedByCurrentUser
-                                                ? 'text-yellow-500 fill-yellow-500'
+                                                ? 'fill-yellow-500 text-yellow-500'
                                                 : 'text-gray-400'
                                         "
                                     />
                                     {{
                                         isMarkedByCurrentUser
-                                            ? 'Unmark'
-                                            : 'Mark'
+                                            ? t('action.unmark')
+                                            : t('action.mark')
                                     }}
                                 </Button>
 
@@ -1021,7 +1089,7 @@ onMounted(() => {
                                         class="w-full justify-start"
                                     >
                                         <Mail class="mr-2 h-4 w-4" />
-                                        Forward via Email
+                                        {{ t('action.forward_email') }}
                                     </Button>
                                 </a>
 
@@ -1032,7 +1100,8 @@ onMounted(() => {
                                     size="sm"
                                     class="w-full justify-start"
                                 >
-                                    Print
+                                    <PrinterCheck class="mr-2 h-4 w-4" />
+                                    {{ t('action.print') }}
                                 </Button>
 
                                 <!-- Delete -->
@@ -1043,7 +1112,7 @@ onMounted(() => {
                                     class="w-full justify-start"
                                 >
                                     <Trash2 class="mr-2 h-4 w-4" />
-                                    Delete Message
+                                    {{ t('action.delete.message') }}
                                 </Button>
                             </CardContent>
                         </Card>
